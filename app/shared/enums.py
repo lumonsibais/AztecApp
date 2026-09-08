@@ -9,12 +9,6 @@ class TransportMode(Enum):
     BIKE = "bike"
 
 
-class SubscriptionTier(Enum):
-    FREE = "free"
-    PREMIUM = "premium"
-    VIP = "vip"
-
-
 class PlaceType(Enum):
     RUIN = "ruin"
     MUSEUM = "museum"
@@ -29,11 +23,17 @@ class TourStatus(Enum):
     ARCHIVED = "archived"
 
 
-class PaymentStatus(Enum):
+class PurchaseStatus(Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
     REFUNDED = "refunded"
+
+
+class Curation(Enum):
+    """Listas editoriales de la pestaña Explore."""
+    MUST_SEE = "must_see"
+    QUICK_STOP = "quick_stop"
 
 
 class LocationPermissionStatus(Enum):

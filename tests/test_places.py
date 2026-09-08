@@ -1,5 +1,6 @@
 """Test places module"""
 import pytest
+from app.extensions import db
 from app.places.services import PlaceService
 from app.places.models import Place
 import uuid
@@ -20,8 +21,10 @@ def test_get_nearby_places(client, app):
             estimated_visit_duration=60,
             is_locked=False,
         )
-        app.extensions["db"].session.add(place)
-        app.extensions["db"].session.commit()
+        # Flask-SQLAlchemy 3.x registra la extensión bajo la clave "sqlalchemy",
+        # no "db". Usar el objeto db directamente evita depender de esa clave.
+        db.session.add(place)
+        db.session.commit()
     
     # Test endpoint
     response = client.get("/api/places/nearby?latitude=19.43&longitude=-99.13&radius=5")

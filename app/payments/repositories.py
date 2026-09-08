@@ -1,79 +1,75 @@
 """Payments repository"""
+from typing import List, Optional
+
 from app.extensions import db
-from app.payments.models import Payment, Subscription
-from typing import Optional, List
+from app.payments.models import Purchase
+from app.shared.constants import PURCHASE_COMPLETED, PURCHASE_PENDING
 
 
-class PaymentRepository:
-    """Repository for Payment operations"""
-    
+class PurchaseRepository:
+    """Acceso a la tabla de compras."""
+
     @staticmethod
-    def find_by_id(payment_id: str) -> Optional[Payment]:
-        """Find payment by ID"""
-        return Payment.query.filter_by(id=payment_id).first()
-    
+    def find_by_id(purchase_id: str) -> Optional[Purchase]:
+        return Purchase.query.filter_by(id=purchase_id).first()
+
     @staticmethod
-    def find_by_user(user_id: str, limit: int = 50) -> List[Payment]:
-        """Get payments by user"""
-        return Payment.query.filter_by(user_id=user_id).limit(limit).all()
-    
-    @staticmethod
-    def find_by_transaction_id(transaction_id: str) -> Optional[Payment]:
-        """Find payment by transaction ID"""
-        return Payment.query.filter_by(transaction_id=transaction_id).first()
-    
-    @staticmethod
-    def save(payment: Payment) -> Payment:
-        """Save a payment"""
-        db.session.add(payment)
-        db.session.commit()
-        return payment
-    
-    @staticmethod
-    def update(payment_id: str, data: dict) -> Optional[Payment]:
-        """Update a payment"""
-        payment = PaymentRepository.find_by_id(payment_id)
-        if not payment:
+    def find_by_reference(provider: str, external_id: str) -> Optional[Purchase]:
+        """Busca por la referencia del proveedor.
+
+        Es la consulta que hace idempotente el cobro: si un recibo llega dos
+        veces —reintento del cliente, webhook duplicado— la segunda encuentra
+        la compra ya registrada en vez de crear otra.
+        """
+        if not external_id:
             return None
-        
-        for key, value in data.items():
-            if hasattr(payment, key):
-                setattr(payment, key, value)
-        
-        db.session.commit()
-        return payment
+        return Purchase.query.filter_by(
+            provider=provider, external_id=external_id
+        ).first()
 
+    @staticmethod
+    def find_by_user(user_id: str, limit: int = 50) -> List[Purchase]:
+        return (
+            Purchase.query.filter_by(user_id=user_id)
+            .order_by(Purchase.created_at.desc())
+            .limit(limit)
+            .all()
+        )
 
-class SubscriptionRepository:
-    """Repository for Subscription operations"""
-    
     @staticmethod
-    def find_by_user_id(user_id: str) -> Optional[Subscription]:
-        """Find subscription by user ID"""
-        return Subscription.query.filter_by(user_id=user_id).first()
-    
+    def find_completed_for_user(user_id: str) -> Optional[Purchase]:
+        return Purchase.query.filter_by(
+            user_id=user_id, status=PURCHASE_COMPLETED
+        ).first()
+
     @staticmethod
-    def find_by_stripe_id(stripe_id: str) -> Optional[Subscription]:
-        """Find subscription by Stripe ID"""
-        return Subscription.query.filter_by(stripe_subscription_id=stripe_id).first()
-    
+    def find_pending_for_user(user_id: str) -> Optional[Purchase]:
+        """La compra que quedó abierta y todavía no se ha cobrado.
+
+        Sirve para no acumular filas muertas: si alguien pulsa "comprar", se
+        arrepiente y vuelve a pulsar, es el mismo intento, no dos.
+        """
+        return (
+            Purchase.query.filter_by(user_id=user_id, status=PURCHASE_PENDING)
+            .order_by(Purchase.created_at.desc())
+            .first()
+        )
+
     @staticmethod
-    def save(subscription: Subscription) -> Subscription:
-        """Save a subscription"""
-        db.session.add(subscription)
+    def save(purchase: Purchase) -> Purchase:
+        db.session.add(purchase)
         db.session.commit()
-        return subscription
-    
+        return purchase
+
     @staticmethod
-    def update(subscription_id: str, data: dict) -> Optional[Subscription]:
-        """Update a subscription"""
-        subscription = Subscription.query.filter_by(id=subscription_id).first()
-        if not subscription:
+    def update(purchase_id: str, data: dict) -> Optional[Purchase]:
+        purchase = PurchaseRepository.find_by_id(purchase_id)
+        if not purchase:
             return None
-        
+
         for key, value in data.items():
-            if hasattr(subscription, key):
-                setattr(subscription, key, value)
-        
+            if hasattr(purchase, key):
+                setattr(purchase, key, value)
+
         db.session.commit()
-        return subscription
+        return purchase

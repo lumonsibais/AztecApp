@@ -1,133 +1,179 @@
-"""Payments service"""
-from typing import Optional, Dict, Any
-from app.payments.repositories import PaymentRepository, SubscriptionRepository
-from app.payments.models import Payment, Subscription
-from app.users.services import UserService
+"""Payments service.
+
+Dos operaciones y un invariante:
+
+  iniciar()    deja una compra pendiente y devuelve lo que el cliente necesita
+  confirmar()  verifica el cobro, marca la compra y CONCEDE el permiso
+
+El invariante es que `users.has_full_access` solo lo toca este servicio, y
+solo después de que `providers.verificar()` haya dado el visto bueno.
+"""
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.extensions import db
+from app.payments.models import Purchase
+from app.payments.providers import PaymentVerificationError, verificar
+from app.payments.repositories import PurchaseRepository
+from app.shared.constants import (
+    CURRENCY_USD,
+    FULL_ACCESS_PRICE_USD,
+    FULL_ACCESS_PRODUCT,
+    PURCHASE_COMPLETED,
+    PURCHASE_FAILED,
+    PURCHASE_PENDING,
+    PURCHASE_REFUNDED,
+)
+from app.users.repositories import UserRepository
+from app.shared.utils import utc_ahora
 
 
-class PaymentService:
-    """Service for payment-related operations"""
-    
+class AlreadyPurchased(Exception):
+    """La cuenta ya tiene el desbloqueo. Cobrar otra vez sería un error."""
+
+
+class PurchaseService:
+    """Compra del desbloqueo completo."""
+
     @staticmethod
-    def create_payment(
-        user_id: str,
-        amount: float,
-        item_type: str,
-        item_id: str,
-        stripe_payment_intent_id: str = None
-    ) -> Payment:
-        """Create a payment record"""
-        payment = Payment(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            amount=amount,
-            item_type=item_type,
-            item_id=item_id,
-            status="pending",
-            stripe_payment_intent_id=stripe_payment_intent_id,
+    def iniciar(user_id: str) -> Purchase:
+        """Crea una compra pendiente.
+
+        Devuelve la fila para que el cliente arranque el pago con el proveedor
+        que toque. Si la cuenta ya tiene acceso, se niega: el desbloqueo es
+        único y no caduca, así que una segunda compra es siempre un error.
+        """
+        usuario = UserRepository.find_by_id(user_id)
+        if usuario is None:
+            return None
+        if usuario.has_full_access:
+            raise AlreadyPurchased(user_id)
+
+        # Si ya había un intento abierto, se reutiliza. Abrir uno nuevo cada
+        # vez que se toca el botón llenaría `purchases` de filas pendientes
+        # que no son compras, solo dudas.
+        abierta = PurchaseRepository.find_pending_for_user(user_id)
+        if abierta is not None:
+            return abierta
+
+        return PurchaseRepository.save(
+            Purchase(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                product=FULL_ACCESS_PRODUCT,
+                provider="",              # se sabrá al confirmar
+                amount=FULL_ACCESS_PRICE_USD,
+                currency=CURRENCY_USD,
+                status=PURCHASE_PENDING,
+            )
         )
-        
-        return PaymentRepository.save(payment)
-    
+
     @staticmethod
-    def complete_payment(payment_id: str, transaction_id: str = None) -> Optional[Payment]:
-        """Mark payment as completed"""
-        data = {
-            "status": "completed",
-            "completed_at": datetime.utcnow(),
-            "transaction_id": transaction_id,
+    def confirmar(
+        user_id: str, provider: str, payload: Dict[str, Any]
+    ) -> Tuple[Purchase, bool]:
+        """Verifica el cobro y concede el acceso.
+
+        Devuelve (compra, recien_concedido). Es idempotente: si el mismo recibo
+        llega dos veces, la segunda devuelve la compra existente sin volver a
+        cobrar ni duplicar nada.
+
+        Lanza PaymentVerificationError si el proveedor no valida el cobro; en
+        ese caso NO se concede nada.
+        """
+        referencia = verificar(provider, payload)
+
+        existente = PurchaseRepository.find_by_reference(provider, referencia)
+        if existente is not None:
+            return existente, False
+
+        ahora = utc_ahora()
+
+        # La compra que abrió /checkout es ESTA misma, ya cobrada: se completa
+        # en vez de insertar otra fila. Si no, el historial de un usuario que
+        # pagó una vez enseñaría dos apuntes —uno "pending" eterno y uno
+        # "completed"— y la app tendría que filtrarlos.
+        abierta = PurchaseRepository.find_pending_for_user(user_id)
+        if abierta is not None:
+            compra = PurchaseRepository.update(abierta.id, {
+                "provider": provider,
+                "external_id": referencia,
+                "status": PURCHASE_COMPLETED,
+                "purchased_at": ahora,
+            })
+        else:
+            compra = PurchaseRepository.save(
+                Purchase(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    product=FULL_ACCESS_PRODUCT,
+                    provider=provider,
+                    external_id=referencia,
+                    amount=FULL_ACCESS_PRICE_USD,
+                    currency=CURRENCY_USD,
+                    status=PURCHASE_COMPLETED,
+                    purchased_at=ahora,
+                )
+            )
+
+        UserRepository.update(
+            user_id, {"has_full_access": True, "full_access_since": ahora}
+        )
+
+        return compra, True
+
+    @staticmethod
+    def fallar(purchase_id: str) -> Optional[Purchase]:
+        return PurchaseRepository.update(purchase_id, {"status": PURCHASE_FAILED})
+
+    @staticmethod
+    def reembolsar(purchase_id: str, motivo: str = None) -> Optional[Purchase]:
+        """Devuelve el dinero y RETIRA el acceso.
+
+        Retirarlo es la mitad que se olvida: si solo se marca la compra, la
+        cuenta se queda con el contenido desbloqueado gratis.
+        """
+        compra = PurchaseRepository.find_by_id(purchase_id)
+        if not compra:
+            return None
+
+        compra = PurchaseRepository.update(
+            purchase_id,
+            {
+                "status": PURCHASE_REFUNDED,
+                "refunded_at": utc_ahora(),
+                "refund_reason": motivo,
+            },
+        )
+
+        otra = PurchaseRepository.find_completed_for_user(compra.user_id)
+        if otra is None:
+            UserRepository.update(
+                compra.user_id,
+                {"has_full_access": False, "full_access_since": None},
+            )
+
+        return compra
+
+    @staticmethod
+    def historial(user_id: str) -> List[Dict[str, Any]]:
+        return [c.to_dict() for c in PurchaseRepository.find_by_user(user_id)]
+
+    @staticmethod
+    def estado_de_acceso(user_id: str) -> Dict[str, Any]:
+        """Lo que la app pregunta al abrir para saber si pintar candados."""
+        usuario = UserRepository.find_by_id(user_id)
+        if usuario is None:
+            return None
+
+        return {
+            "hasFullAccess": bool(usuario.has_full_access),
+            "since": (
+                usuario.full_access_since.isoformat()
+                if usuario.full_access_since else None
+            ),
+            "product": FULL_ACCESS_PRODUCT,
+            "price": FULL_ACCESS_PRICE_USD,
+            "currency": CURRENCY_USD,
         }
-        
-        return PaymentRepository.update(payment_id, data)
-    
-    @staticmethod
-    def fail_payment(payment_id: str, error: str = None) -> Optional[Payment]:
-        """Mark payment as failed"""
-        return PaymentRepository.update(
-            payment_id,
-            {"status": "failed"}
-        )
-    
-    @staticmethod
-    def refund_payment(payment_id: str, reason: str = None) -> Optional[Payment]:
-        """Refund a payment"""
-        payment = PaymentRepository.find_by_id(payment_id)
-        if not payment:
-            return None
-        
-        return PaymentRepository.update(
-            payment_id,
-            {
-                "status": "refunded",
-                "refund_amount": payment.amount,
-                "refund_reason": reason,
-                "refunded_at": datetime.utcnow(),
-            }
-        )
-    
-    @staticmethod
-    def get_user_payments(user_id: str) -> list:
-        """Get user's payment history"""
-        payments = PaymentRepository.find_by_user(user_id)
-        return [p.to_dict() for p in payments]
-
-
-class SubscriptionService:
-    """Service for subscription management"""
-    
-    @staticmethod
-    def create_subscription(
-        user_id: str,
-        tier: str,
-        monthly_price: float,
-        stripe_subscription_id: str = None,
-        stripe_customer_id: str = None
-    ) -> Subscription:
-        """Create a subscription"""
-        current_period_end = datetime.utcnow() + timedelta(days=30)
-        
-        subscription = Subscription(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
-            tier=tier,
-            monthly_price=monthly_price,
-            current_period_end=current_period_end,
-            stripe_subscription_id=stripe_subscription_id,
-            stripe_customer_id=stripe_customer_id,
-        )
-        
-        return SubscriptionRepository.save(subscription)
-    
-    @staticmethod
-    def upgrade_subscription(user_id: str, new_tier: str) -> Optional[Subscription]:
-        """Upgrade user's subscription tier"""
-        subscription = SubscriptionRepository.find_by_user_id(user_id)
-        if not subscription:
-            return None
-        
-        return SubscriptionRepository.update(
-            subscription.id,
-            {"tier": new_tier}
-        )
-    
-    @staticmethod
-    def cancel_subscription(user_id: str) -> Optional[Subscription]:
-        """Cancel subscription"""
-        subscription = SubscriptionRepository.find_by_user_id(user_id)
-        if not subscription:
-            return None
-        
-        return SubscriptionRepository.update(
-            subscription.id,
-            {
-                "is_active": False,
-                "cancelled_at": datetime.utcnow(),
-            }
-        )
-    
-    @staticmethod
-    def get_user_subscription(user_id: str) -> Optional[Subscription]:
-        """Get user's current subscription"""
-        return SubscriptionRepository.find_by_user_id(user_id)

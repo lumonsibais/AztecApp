@@ -1,335 +1,351 @@
-"""Script para cargar datos de prueba (seed)"""
-from app import create_app, db
-from app.places.models import Place
-from app.tours.models import Tour
-from app.historical.models import HistoricalContent, Timeline, LakeView
+"""Datos de prueba.
+
+Doble función: sirve para desarrollar el backend y es el fixture contra el que
+va a programar el frontend, así que intenta parecerse a lo que verá la app.
+
+El contenido va en INGLÉS porque es el idioma base del producto: lo que vive en
+las columnas de cada modelo. El español entra como traducción en la tabla
+`translations`, igual que entrará cualquier otro idioma.
+"""
 import uuid
+
+from app import create_app, db
+from app.historical.models import HistoricalContent, Timeline
+from app.historical.services import LakeViewService
+from app.places.models import Place
+from app.shared.constants import (
+    CURATION_MUST_SEE,
+    CURATION_QUICK_STOP,
+    ERA_HISTORIC_YEAR,
+    SURFACE_LAND,
+    SURFACE_WATER,
+)
+from app.shared.translations import ENTITY_HISTORICAL, ENTITY_PLACE, ENTITY_TOUR
+from app.shared.translations_repository import TranslationRepository
+from app.tours.models import Tour, TourStop
 
 app = create_app()
 
 
-def seed_places():
-    """Cargar sitios de prueba"""
-    with app.app_context():
-        places_data = [
-            {
-                "name": "Templo Mayor",
-                "description": "El templo más importante de Tenochtitlan, dedicado a Huitzilopochtli y Tláloc",
-                "latitude": 19.4361,
-                "longitude": -99.1356,
-                "place_type": "ruin",
-                "historical_significance": "Centro religioso y político del imperio azteca",
-                "tenochtitlan_name": "Huei Teocalli",
-                "estimated_visit_duration": 90,
-                "is_locked": False,
-                "opening_hours": "9:00 AM - 5:00 PM",
-                "entry_fee": 85,
-                "has_bathrooms": True,
-                "has_cafes": True,
-                "has_hotels": True,
-                "archaeological": True,
-                "era_description": "Construido en 1325, ampliado múltiples veces hasta 1521",
-            },
-            {
-                "name": "Museo Nacional de Antropología",
-                "description": "Museo con la colección más grande de artefactos prehispánicos de México",
-                "latitude": 19.4269,
-                "longitude": -99.1878,
-                "place_type": "museum",
-                "historical_significance": "Alberga la Piedra del Sol y otros tesoros aztecas",
-                "estimated_visit_duration": 180,
-                "is_locked": True,
-                "required_subscription": "premium",
-                "unlock_price": 15.0,
-                "opening_hours": "9:00 AM - 7:00 PM (Closed Mondays)",
-                "entry_fee": 80,
-                "has_bathrooms": True,
-                "has_cafes": True,
-                "has_hotels": True,
-                "archaeological": False,
-            },
-            {
-                "name": "Palacio Nacional",
-                "description": "Edificio que fue construido sobre el Palacio de Montezuma",
-                "latitude": 19.4353,
-                "longitude": -99.1344,
-                "place_type": "cultural_center",
-                "historical_significance": "Contiene murales de Diego Rivera que narran la historia de México",
-                "tenochtitlan_name": "Tecpan",
-                "estimated_visit_duration": 60,
-                "is_locked": False,
-                "opening_hours": "10:00 AM - 5:00 PM",
-                "entry_fee": 0,  # Free
-                "has_bathrooms": True,
-                "has_cafes": False,
-                "has_hotels": False,
-                "archaeological": False,
-            },
-            {
-                "name": "Zona Arqueológica de Malinalco",
-                "description": "Antiguo centro ceremonial mexica con edificios tallados en la roca",
-                "latitude": 18.9989,
-                "longitude": -99.5034,
-                "place_type": "ruin",
-                "historical_significance": "Templo de las Guerras Floridas dedicado a Tezcatlipoca",
-                "estimated_visit_duration": 120,
-                "is_locked": True,
-                "required_subscription": "premium",
-                "unlock_price": 15.0,
-                "opening_hours": "9:00 AM - 5:00 PM",
-                "entry_fee": 75,
-                "has_bathrooms": True,
-                "has_cafes": False,
-                "has_hotels": False,
-                "archaeological": True,
-            },
-        ]
-        
-        places = []
-        for data in places_data:
-            place = Place(
-                id=str(uuid.uuid4()),
-                **data
-            )
-            db.session.add(place)
-            places.append(place)
-        
-        db.session.commit()
-        print(f"✓ Added {len(places)} places")
-        return places
+# --------------------------------------------------------------------------
+# Sitios
+# --------------------------------------------------------------------------
 
+SITIOS = [
+    {
+        "id": "templo-mayor",
+        "name": "Templo Mayor Remains",
+        "tagline": "Witness the sacred beating heart of the Aztec Empire.",
+        "description": "What's left of the great Temple of Tenochtitlan, "
+                       "uncovered by accident in 1978 and excavated ever since.",
+        "latitude": 19.4361, "longitude": -99.1356,
+        "neighborhood": "Centro Histórico",
+        "place_type": "ruin",
+        "curation": CURATION_MUST_SEE,
+        "editorial_rating": 4.5,
+        "historical_significance": "The epicentre of Aztec religious and political life.",
+        "why_visit": "Your exploration of Mexico City's archaeology must start "
+                     "here. This is where the empire measured the centre of its "
+                     "world, and there is a lot to take in even from outside.",
+        "how_to_get_there": "República de Guatemala 60, Centro Histórico. "
+                            "Metro Zócalo, line 2, two minutes on foot.",
+        "estimated_visit_duration": 90,
+        "visit_duration_text": "30 min if you only observe from the outside "
+                               "viewpoint. 1-3 hours with the museum.",
+        "opening_hours": "Tuesday to Sunday, 9 AM to 5 PM",
+        "entry_fee_mxn": 95, "entry_fee_usd": 5.50,
+        "entry_fee_text": "Free from the outside viewpoint, or 95 MXN for the "
+                          "museum and the archaeological site.",
+        "is_free_entry": False, "is_outdoor": True, "archaeological": True,
+        "tenochtitlan_name": "Huei Teocalli",
+        "has_bathrooms": True, "has_cafes": True,
+        "is_locked": False,
+        "es": {
+            "name": "Restos del Templo Mayor",
+            "tagline": "Asómate al corazón sagrado del imperio azteca.",
+            "description": "Lo que queda del gran templo de Tenochtitlan, "
+                           "descubierto por accidente en 1978.",
+        },
+    },
+    {
+        "id": "museo-antropologia",
+        "name": "National Museum of Anthropology",
+        "tagline": "Come face-to-face with the legendary 24-ton Aztec Sun Stone.",
+        "description": "The largest collection of pre-Hispanic artifacts in "
+                       "the world, inside a landmark of modern architecture.",
+        "latitude": 19.4260, "longitude": -99.1863,
+        "neighborhood": "Bosque de Chapultepec",
+        "place_type": "museum",
+        "curation": CURATION_MUST_SEE,
+        "editorial_rating": 5.0,
+        "historical_significance": "Houses the Sun Stone and the Aztec hall.",
+        "why_visit": "If you only enter one building in Mexico City, this is "
+                     "the one. The Mexica hall alone justifies the trip.",
+        "how_to_get_there": "Av. Paseo de la Reforma s/n. Metro Auditorio, "
+                            "line 7, ten minutes on foot through the park.",
+        "estimated_visit_duration": 180,
+        "visit_duration_text": "2-4 hours. Half a day for the whole museum.",
+        "opening_hours": "Tuesday to Sunday, 9 AM to 6 PM",
+        "entry_fee_mxn": 95, "entry_fee_usd": 5.50,
+        "entry_fee_text": "95 MXN. Free for Mexican residents on Sundays.",
+        "is_free_entry": False, "is_outdoor": False,
+        "has_bathrooms": True, "has_cafes": True,
+        "is_locked": True,
+        "es": {
+            "name": "Museo Nacional de Antropología",
+            "tagline": "Ponte frente a la Piedra del Sol y sus 24 toneladas.",
+        },
+    },
+    {
+        "id": "tlatelolco",
+        "name": "Plaza de las Tres Culturas",
+        "tagline": "Walk the best preserved Aztec site where 3 eras collide.",
+        "description": "Aztec ruins, a colonial church and modern housing "
+                       "sharing one square.",
+        "latitude": 19.4510, "longitude": -99.1370,
+        "neighborhood": "Tlatelolco",
+        "place_type": "historical_site",
+        "curation": CURATION_MUST_SEE,
+        "editorial_rating": 4.0,
+        "historical_significance": "Site of the last stand of the Mexica in 1521.",
+        "why_visit": "Three periods of the country stacked on a single square, "
+                     "and the clearest place to understand what was lost.",
+        "how_to_get_there": "Metro Tlatelolco, line 3, five minutes on foot.",
+        "estimated_visit_duration": 60,
+        "visit_duration_text": "About an hour, walking around the square.",
+        "entry_fee_mxn": 0, "entry_fee_usd": 0,
+        "entry_fee_text": "Free.",
+        "is_free_entry": True, "is_outdoor": True, "archaeological": True,
+        "tenochtitlan_name": "Tlatelolco",
+        "is_locked": False,
+        "es": {
+            "name": "Plaza de las Tres Culturas",
+            "tagline": "El sitio azteca mejor conservado, donde chocan 3 épocas.",
+        },
+    },
+    {
+        "id": "monumento-mexicanidad",
+        "name": "Monument of Mexicanity",
+        "tagline": "Discover the Aztec founding myth.",
+        "description": "A modern sculpture of the eagle on the cactus, where "
+                       "the founding legend begins.",
+        "latitude": 19.4340, "longitude": -99.1420,
+        "neighborhood": "Centro Histórico",
+        "place_type": "monument",
+        "curation": CURATION_QUICK_STOP,
+        "editorial_rating": 3.5,
+        "historical_significance": "Represents the founding of Tenochtitlan.",
+        "why_visit": "A five-minute stop that sets up everything else you are "
+                     "about to see.",
+        "how_to_get_there": "On the corner of the Alameda, walking distance "
+                            "from Bellas Artes.",
+        "estimated_visit_duration": 15,
+        "visit_duration_text": "5-10 minutes.",
+        "entry_fee_mxn": 0, "entry_fee_usd": 0,
+        "entry_fee_text": "Free.",
+        "is_free_entry": True, "is_outdoor": True,
+        "is_locked": False,
+        "es": {
+            "name": "Monumento a la Mexicanidad",
+            "tagline": "Conoce el mito fundacional azteca.",
+        },
+    },
+]
+
+
+def seed_places():
+    creados = []
+    for datos in SITIOS:
+        campos = dict(datos)
+        traducciones = campos.pop("es", {})
+        place = Place(**campos)
+        db.session.add(place)
+        creados.append((place, traducciones))
+    db.session.commit()
+
+    for place, traducciones in creados:
+        for campo, valor in traducciones.items():
+            TranslationRepository.upsert(ENTITY_PLACE, place.id, "es", campo, valor)
+
+    print(f"OK  {len(creados)} sitios (con traducciones al español)")
+    return [p for p, _ in creados]
+
+
+# --------------------------------------------------------------------------
+# Tours con sus paradas
+# --------------------------------------------------------------------------
 
 def seed_tours(places):
-    """Cargar tours de prueba"""
-    with app.app_context():
-        tours_data = [
-            {
-                "title": "Introduction to Tenochtitlan",
-                "description": "A beginner-friendly walk through downtown CDMX to discover the history of Tenochtitlan",
-                "status": "published",
-                "is_free": True,
-                "price": 0,
-                "is_locked": False,
-                "estimated_duration": 120,
-                "difficulty_level": "easy",
-                "total_distance": 2.5,
-                "content_description": "Learn about the three main Aztec temples and their significance",
-                "includes_audio": True,
-            },
-            {
-                "title": "Advanced: Empire Expansion Route",
-                "description": "Explore sites related to the Aztec Empire's military conquests",
-                "status": "published",
-                "is_free": False,
-                "price": 15.0,
-                "is_locked": True,
-                "estimated_duration": 180,
-                "difficulty_level": "medium",
-                "total_distance": 8.0,
-                "content_description": "Detailed history of the Triple Alliance and conquered territories",
-                "includes_audio": True,
-            },
-            {
-                "title": "Hidden Gems: Lesser-Known Sites",
-                "description": "Discover sites often missed by regular tourists",
-                "status": "published",
-                "is_free": True,
-                "price": 0,
-                "is_locked": False,
-                "estimated_duration": 150,
-                "difficulty_level": "medium",
-                "total_distance": 5.0,
-                "content_description": "Explore archaeological sites away from the main tourist routes",
-                "includes_audio": True,
-            },
-        ]
-        
-        tours = []
-        for i, data in enumerate(tours_data):
-            tour = Tour(
-                id=str(uuid.uuid4()),
-                **data
-            )
-            # Associate with places (simple round-robin)
-            if places:
-                tour.places.append(places[i % len(places)])
-                if i < len(places):
-                    tour.places.append(places[(i + 1) % len(places)])
-            
-            db.session.add(tour)
-            tours.append(tour)
-        
-        db.session.commit()
-        print(f"✓ Added {len(tours)} tours")
-        return tours
+    tour = Tour(
+        id="unearth-tenochtitlan",
+        title="Unearth Tenochtitlan",
+        description="Peel back the layers of the modern capital on a targeted "
+                    "walk through its foundational sites.",
+        content_description="A self-paced walk through the ceremonial centre "
+                            "of the Mexica world, stop by stop.",
+        status="published",
+        is_free=False,
+        is_locked=True,
+        estimated_duration=105,
+        duration_text="1 - 2 hours",
+        difficulty_level="easy",
+        total_distance=2.4,
+        has_entry_fees=False,
+        editorial_rating=4.5,
+    )
+    db.session.add(tour)
+    db.session.flush()
+
+    # El orden ES el recorrido: sin `position` las paradas salían arbitrarias,
+    # que en un tour a pie es sencillamente estar perdido.
+    recorrido = [
+        ("monumento-mexicanidad", 0, 95,
+         "Next, let's go to the Aztec's sacred precinct."),
+        ("templo-mayor", 1, 240,
+         "From the temple we walk north, to where the empire made its last stand."),
+        ("tlatelolco", 2, 180, None),
+    ]
+
+    for place_id, posicion, duracion, transicion in recorrido:
+        db.session.add(TourStop(
+            id=str(uuid.uuid4()),
+            tour_id=tour.id,
+            place_id=place_id,
+            position=posicion,
+            audio_url=f"https://cdn.example/audio/{place_id}.mp3",
+            audio_duration_seconds=duracion,
+            transition_text=transicion,
+        ))
+
+    db.session.commit()
+
+    TranslationRepository.upsert(
+        ENTITY_TOUR, tour.id, "es", "title", "Desenterrar Tenochtitlan"
+    )
+    TranslationRepository.upsert(
+        ENTITY_TOUR, tour.id, "es", "duration_text", "1 - 2 horas"
+    )
+
+    print(f"OK  1 tour con {len(recorrido)} paradas ordenadas y audio")
+    return [tour]
 
 
-def seed_historical_content():
-    """Cargar contenido histórico"""
-    with app.app_context():
-        content_data = [
-            {
-                "title": "The Aztec Capital: Tenochtitlan",
-                "description": "Explore the history of the magnificent capital of the Aztec Empire",
-                "content_type": "text",
-                "text_content": """
-Tenochtitlan was one of the largest cities in the world in the 15th century, with a population 
-estimated at 200,000-400,000. The city was built on an island in Lake Texcoco, and was connected 
-by canals and causeways. The city was divided into four districts, each representing one of the 
-four Aztec nations that formed the Triple Alliance.
-                """,
-                "era": "Aztec Empire (1345-1521)",
-                "author": "Dr. Miguel López",
-                "verified": True,
-            },
-            {
-                "title": "The Templo Mayor: Architectural Marvel",
-                "description": "Understanding the design and construction of the main Aztec temple",
-                "content_type": "text",
-                "text_content": """
-The Templo Mayor was built in multiple stages over approximately 200 years. Each ruler added 
-their own layer to the temple, which explains its pyramidal structure. The temple was dedicated 
-to two gods: Huitzilopochtli (god of war) and Tláloc (god of rain).
-                """,
-                "era": "Aztec Empire (1325-1521)",
-                "author": "Dr. Maria García",
-                "verified": True,
-            },
-            {
-                "title": "The Three Cultures of Mexico City",
-                "description": "How Aztec, Spanish colonial, and modern influences shaped CDMX",
-                "content_type": "article",
-                "text_content": """
-Mexico City is a unique blend of Aztec, Spanish colonial, and modern influences. Walking through 
-the historic center, you can see pre-Hispanic temples next to colonial churches and modern buildings. 
-This layering of cultures tells the story of Mexico's complex history.
-                """,
-                "era": "Aztec to Modern",
-                "author": "Dr. Carlos Mendez",
-                "verified": True,
-            },
-        ]
-        
-        contents = []
-        for data in content_data:
-            content = HistoricalContent(
-                id=str(uuid.uuid4()),
-                **data
-            )
-            db.session.add(content)
-            contents.append(content)
-        
-        db.session.commit()
-        print(f"✓ Added {len(contents)} historical content pieces")
-        return contents
+# --------------------------------------------------------------------------
+# Guía histórica
+# --------------------------------------------------------------------------
+
+def seed_history():
+    cronologia = Timeline(
+        id="mexica-chronology",
+        title="Understanding the legacy of the Aztec",
+        description="From the founding of Tenochtitlan to the fall of the empire.",
+        sort_order=0,
+    )
+    db.session.add(cronologia)
+    db.session.flush()
+
+    articulos = [
+        ("founding", "The eagle and the cactus", "Foundation myth",
+         "An eagle perched on a cactus told the Mexica where to build.", 4, 0, False),
+        ("lake-city", "A city built on water", "Daily life",
+         "Tenochtitlan grew on an island, connected by causeways and canals.", 6, 1, False),
+        ("fall", "The fall of Tenochtitlan", "Conquest",
+         "When we saw all those cities built in the water, we were amazed.", 8, 2, True),
+    ]
+
+    creados = []
+    for slug, titulo, tema, cuerpo, minutos, orden, bloqueado in articulos:
+        contenido = HistoricalContent(
+            id=slug,
+            title=titulo,
+            description=cuerpo,
+            content_type="text",
+            text_content=" ".join([cuerpo] * 12),
+            timeline_id=cronologia.id,
+            sort_order=orden,
+            era="Aztec Empire (1345-1521)",
+            topic=tema,
+            reading_time_minutes=minutos,
+            is_locked=bloqueado,
+            author="AztecApp editorial",
+            verified=True,
+        )
+        db.session.add(contenido)
+        creados.append(contenido)
+
+    db.session.commit()
+
+    TranslationRepository.upsert(
+        ENTITY_HISTORICAL, "founding", "es", "title", "El águila y el nopal"
+    )
+
+    print(f"OK  1 cronología con {len(creados)} artículos, tiempos de lectura y temas")
+    return creados
 
 
-def seed_timelines():
-    """Cargar timelines"""
-    with app.app_context():
-        timelines_data = [
-            {
-                "title": "Aztec Empire Timeline",
-                "description": "Major events and periods in Aztec history from 1345 to 1521",
-            },
-            {
-                "title": "Spanish Conquest Timeline",
-                "description": "Events leading to and during the Spanish conquest of Mexico (1519-1521)",
-            },
-            {
-                "title": "Mexico City Evolution",
-                "description": "How Mexico City developed from Tenochtitlan to the modern metropolis",
-            },
-        ]
-        
-        timelines = []
-        for data in timelines_data:
-            timeline = Timeline(
-                id=str(uuid.uuid4()),
-                **data
-            )
-            db.session.add(timeline)
-            timelines.append(timeline)
-        
-        db.session.commit()
-        print(f"✓ Added {len(timelines)} timelines")
-        return timelines
+# --------------------------------------------------------------------------
+# Overlay del lago
+# --------------------------------------------------------------------------
 
+def seed_lake():
+    """Polígonos del lago.
 
-def seed_lake_data():
-    """Cargar datos del lago"""
-    with app.app_context():
-        lake_data = [
-            {
-                "latitude": 19.4361,
-                "longitude": -99.1356,
-                "was_water": True,
-                "year_estimate": 1500,
-                "description": "Templo Mayor was built on an island in Lake Texcoco",
-                "tenochtitlan_name": "Huei Teocalli Island",
+    Los trazados son APROXIMACIONES para desarrollo, no cartografía histórica.
+    Todos llevan el mismo año porque es lo que consulta el conmutador
+    «1500 / 2026» del mapa.
+    """
+    # El orden importa al pintar: el agua va primero y las islas encima. La app
+    # dibuja en el orden en que llegan los Features.
+    poligonos = [
+        (SURFACE_WATER, "Lake Texcoco", "Texcoco",
+         "The salt lake surrounding the islands, drained over four centuries",
+         [(-99.1700, 19.3900), (-99.1700, 19.4900), (-99.0400, 19.4900),
+          (-99.0400, 19.3900), (-99.1700, 19.3900)]),
+        (SURFACE_LAND, "Island of Tenochtitlan", "Tenochtitlan",
+         "The main island, holding the ceremonial precinct",
+         [(-99.1450, 19.4250), (-99.1450, 19.4450), (-99.1240, 19.4450),
+          (-99.1240, 19.4250), (-99.1450, 19.4250)]),
+        (SURFACE_LAND, "Tlatelolco", "Tlatelolco",
+         "The twin island to the north, home of the great market",
+         [(-99.1450, 19.4450), (-99.1450, 19.4560), (-99.1300, 19.4560),
+          (-99.1300, 19.4450), (-99.1450, 19.4450)]),
+    ]
+
+    creados = []
+    for superficie, nombre, nahuatl, descripcion, coords in poligonos:
+        creados.append(LakeViewService.create_lake_geometry(
+            name=nombre,
+            geojson_polygon={
+                "type": "Polygon",
+                # GeoJSON usa [longitud, latitud], igual que PostGIS.
+                "coordinates": [[[lon, lat] for lon, lat in coords]],
             },
-            {
-                "latitude": 19.4410,
-                "longitude": -99.1250,
-                "was_water": True,
-                "year_estimate": 1450,
-                "description": "This area was part of the canals of Tenochtitlan",
-                "tenochtitlan_name": "Canal system",
-            },
-            {
-                "latitude": 19.4300,
-                "longitude": -99.1400,
-                "was_water": False,
-                "year_estimate": 1500,
-                "description": "This area was one of the main residential districts",
-                "tenochtitlan_name": "Tlatelolco Quarter",
-            },
-        ]
-        
-        views = []
-        for data in lake_data:
-            view = LakeView(
-                id=str(uuid.uuid4()),
-                **data
-            )
-            db.session.add(view)
-            views.append(view)
-        
-        db.session.commit()
-        print(f"✓ Added {len(views)} lake view data points")
-        return views
+            year_estimate=ERA_HISTORIC_YEAR,
+            surface_type=superficie,
+            tenochtitlan_name=nahuatl,
+            description=descripcion,
+        ))
+
+    print(f"OK  {len(creados)} polígonos del lago para el año {ERA_HISTORIC_YEAR}")
+    return creados
 
 
 def main():
-    """Run all seed functions"""
     with app.app_context():
-        print("Starting database seed...")
-        
-        # Create tables if they don't exist
-        db.create_all()
-        
-        # Check if already seeded
         if Place.query.first():
-            print("⚠ Database already has data. Skipping seed.")
+            print("La base ya tiene datos. No se siembra nada.")
             return
-        
+
         try:
             places = seed_places()
-            tours = seed_tours(places)
-            content = seed_historical_content()
-            timelines = seed_timelines()
-            lake_data = seed_lake_data()
-            
-            print("\n✓ Database seeding completed successfully!")
-            print(f"  - {len(places)} places")
-            print(f"  - {len(tours)} tours")
-            print(f"  - {len(content)} historical content")
-            print(f"  - {len(timelines)} timelines")
-            print(f"  - {len(lake_data)} lake data points")
-            
+            seed_tours(places)
+            seed_history()
+            seed_lake()
+            print("\nSiembra completada.")
         except Exception as e:
-            print(f"\n✗ Error during seeding: {e}")
             db.session.rollback()
+            print(f"\nError durante la siembra: {e}")
+            raise
 
 
 if __name__ == "__main__":

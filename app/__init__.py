@@ -5,6 +5,7 @@ from app.config import get_config
 from app.extensions import db, migrate, jwt, cors
 from app.shared.utils import format_response
 from app.shared.constants import ERROR_MESSAGES
+from app.shared.i18n import register_locale_middleware
 
 # Import blueprints
 from app.places import places_bp
@@ -29,7 +30,17 @@ def create_app(config_env: str = None):
     migrate.init_app(app, db)
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": app.config['CORS_ORIGINS']}})
-    
+
+    # Un token revocado (logout) deja de valer aunque no haya expirado.
+    # El import va dentro de la función para no crear un ciclo con app.users.
+    @jwt.token_in_blocklist_loader
+    def _token_revoked(jwt_header, jwt_payload):
+        from app.users.services import UserService
+        return UserService.is_token_revoked(jwt_payload["jti"])
+
+    # Idioma de la petición: deja g.locale listo antes de cualquier handler.
+    register_locale_middleware(app)
+
     # Register blueprints
     app.register_blueprint(places_bp)
     app.register_blueprint(tours_bp)
@@ -60,10 +71,10 @@ def create_app(config_env: str = None):
             error=ERROR_MESSAGES["INTERNAL_ERROR"]
         )), 500
     
-    # Create tables
-    with app.app_context():
-        db.create_all()
-    
+    # El esquema se gestiona con Alembic (Flask-Migrate): `flask db upgrade`.
+    # db.create_all() aquí competía con las migraciones y creaba las tablas
+    # saltándose el control de versiones del esquema.
+
     return app
 
 

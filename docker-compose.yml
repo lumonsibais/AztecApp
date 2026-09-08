@@ -1,0 +1,92 @@
+# Todo el backend con un comando:
+#
+#     docker compose up
+#
+# Levanta Postgres con PostGIS, aplica migraciones, siembra datos de prueba si
+# la base está vacía y deja la API en http://localhost:5000.
+#
+# Para trabajar solo en el frontend, sin base de datos ni backend:
+#
+#     docker compose --profile mock up mock
+#
+# ...y el mock del contrato queda en http://localhost:4010, sirviendo ejemplos
+# generados desde openapi.json. La app Flutter no nota la diferencia: los dos
+# hablan el mismo contrato.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: aztec_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aztec
+      POSTGRES_PASSWORD: aztec
+      POSTGRES_DB: aztec_explorer
+    ports:
+      # Se queda en el 5432 de siempre: nada lo disputa hoy, y moverlo
+      # rompería el DATABASE_URL de cualquiera que corra la app o los tests
+      # desde su venv en lugar de dentro del contenedor. Configurable por si
+      # algún día aparece un PostgreSQL de brew: DB_PORT=5433 docker compose up
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - aztec_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aztec -d aztec_explorer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: aztec_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        # `service_healthy` y no `service_started`: el contenedor de Postgres
+        # está "arrancado" bastante antes de aceptar conexiones, y las
+        # migraciones fallarían por unos segundos de diferencia.
+        condition: service_healthy
+    environment:
+      # `db` es el nombre del servicio: dentro de la red de compose resuelve
+      # solo. Ojo, no es localhost — localhost aquí sería el propio contenedor.
+      DATABASE_URL: postgresql://aztec:aztec@db:5432/aztec_explorer
+      FLASK_ENV: development
+      SECRET_KEY: dev-solo-para-desarrollo
+      JWT_SECRET_KEY: dev-solo-para-desarrollo
+      # La pasarela no está implementada y /confirm responde 501. En local se
+      # salta la verificación para poder probar el desbloqueo; en cualquier
+      # entorno de verdad esto va en false y no se discute.
+      PAYMENTS_ALLOW_UNVERIFIED: "true"
+    ports:
+      # 5001 en el anfitrión, no 5000. Dos motivos, y los dos son reales en
+      # esta máquina: iBet ya publica su API en el 5000, y en macOS AirPlay
+      # Receiver también se lo queda desde Monterey. Dentro del contenedor la
+      # app sigue en el 5000 de siempre; lo que cambia es la puerta de la calle.
+      #
+      # Si el 5001 también estuviera ocupado: API_PORT=5002 docker compose up
+      - "${API_PORT:-5001}:5000"
+    volumes:
+      # El código va montado: al guardar un archivo Flask recarga solo, sin
+      # reconstruir la imagen.
+      - .:/app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/api/places/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+  # Mock del contrato. No arranca con `docker compose up`: hay que pedirlo por
+  # su perfil, porque casi siempre se quiere el backend de verdad.
+  mock:
+    image: stoplight/prism:5
+    container_name: aztec_mock
+    profiles: ["mock"]
+    command: mock -h 0.0.0.0 -p 4010 /openapi.json
+    volumes:
+      - ./openapi.json:/openapi.json:ro
+    ports:
+      - "${MOCK_PORT:-4010}:4010"
+
+volumes:
+  aztec_pgdata:

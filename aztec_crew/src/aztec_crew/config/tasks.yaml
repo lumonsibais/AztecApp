@@ -1,0 +1,228 @@
+# Sprint 1 — modelos de i18n y PostGIS
+#
+# Cada tarea genera UN archivo. El modelo local es un Qwen2.5-Coder 3B: no
+# razona sobre el repo, no ve otros archivos y se pierde con instrucciones
+# abiertas. Por eso cada descripción trae el esqueleto exacto que debe rellenar
+# y prohíbe explícitamente el texto alrededor del código.
+#
+# La salida NO se copia directamente al proyecto: cae en output/sprint1/ y pasa
+# por revisión antes de entrar en app/.
+
+t1_translation_model:
+  agent: model_engineer
+  description: >
+    Escribe el modelo SQLAlchemy `Translation` para AztecApp.
+
+    Guarda traducciones de CUALQUIER modelo sin tocar sus tablas.
+
+    Empieza el archivo exactamente con estas dos líneas:
+      from app.extensions import db
+      from datetime import datetime
+
+    La clase se llama Translation, hereda de db.Model, __tablename__ = 'translations'.
+
+    Columnas, en este orden:
+      id               db.String(36), primary_key=True
+      entity_type      db.String(50), nullable=False   # 'place', 'tour', 'historical_content'
+      entity_id        db.String(36), nullable=False
+      locale           db.String(5),  nullable=False   # 'es', 'en'
+      field            db.String(50), nullable=False   # 'name', 'description'
+      value            db.Text,       nullable=False
+      created_at       db.DateTime, default=datetime.utcnow
+      updated_at       db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+
+    Después de las columnas añade __table_args__ con exactamente dos elementos:
+      db.UniqueConstraint('entity_type', 'entity_id', 'locale', 'field', name='uq_translation'),
+      db.Index('ix_translation_lookup', 'entity_type', 'entity_id', 'locale'),
+
+    Añade un método to_dict(self) que devuelva un diccionario con las claves en
+    camelCase: id, entityType, entityId, locale, field, value.
+
+    No añadas relaciones. No añadas ningún otro método.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después. Sin ejemplos de uso.
+    El archivo empieza por la palabra `from` y termina con el último return.
+  output_file: output/sprint1/translations_model.py
+
+t2_translation_repository:
+  agent: model_engineer
+  description: >
+    Escribe la clase `TranslationRepository` para el modelo Translation.
+
+    Empieza el archivo exactamente con estas cuatro líneas:
+      import uuid
+      from typing import Dict, List
+      from app.extensions import db
+      from app.shared.translations import Translation
+
+    Clase TranslationRepository, sin __init__, todos los métodos con @staticmethod.
+
+    Método 1:
+      find_for_entity(entity_type: str, entity_id: str, locale: str) -> Dict[str, str]
+      Consulta Translation.query.filter_by(entity_type=..., entity_id=..., locale=...).all()
+      y devuelve un diccionario {t.field: t.value for t in filas}.
+
+    Método 2:
+      find_for_entities(entity_type: str, entity_ids: List[str], locale: str) -> Dict[str, Dict[str, str]]
+      UNA sola consulta, con filter_by de entity_type y locale más un
+      filter(Translation.entity_id.in_(entity_ids)).
+      Devuelve {entity_id: {field: value}}.
+      Este método existe para evitar el N+1 en los listados: nunca llames a
+      find_for_entity dentro de un bucle.
+      Si entity_ids está vacío, devuelve {} sin consultar nada.
+
+    Método 3:
+      upsert(entity_type: str, entity_id: str, locale: str, field: str, value: str) -> Translation
+      Busca la fila existente con filter_by de los cuatro campos. Si existe,
+      actualiza value. Si no existe, crea una nueva con id=str(uuid.uuid4()) y
+      hace db.session.add. En ambos casos termina con db.session.commit() y
+      devuelve el objeto.
+
+    No uses SQLAlchemy 2.0 style: nada de select(). Usa Model.query, como el
+    resto de repositorios del proyecto.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después.
+  output_file: output/sprint1/translations_repository.py
+
+t3_locale_middleware:
+  agent: service_developer
+  description: >
+    Escribe el módulo que resuelve el idioma de cada petición en AztecApp.
+
+    Empieza el archivo exactamente con esta línea:
+      from flask import g, request
+
+    Define estas dos constantes justo después:
+      SUPPORTED_LOCALES = ("es", "en")
+      DEFAULT_LOCALE = "es"
+
+    Función 1:
+      parse_accept_language(header: str) -> str
+      Recibe el valor crudo de la cabecera Accept-Language, por ejemplo
+      "en-US,en;q=0.9,es;q=0.8". Devuelve el primer idioma soportado que
+      aparezca, mirando solo los dos primeros caracteres de cada entrada y
+      respetando el orden del header. Si el header es None, está vacío, o no
+      contiene ningún idioma soportado, devuelve DEFAULT_LOCALE.
+      Separa por comas y de cada trozo quita lo que venga después de ';'.
+
+    Función 2:
+      current_locale() -> str
+      Devuelve getattr(g, "locale", DEFAULT_LOCALE).
+
+    Función 3:
+      register_locale_middleware(app) -> None
+      Registra con @app.before_request una función que haga:
+        g.locale = parse_accept_language(request.headers.get("Accept-Language"))
+
+    No uses ninguna librería externa. Nada de babel ni de flask_babel.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después.
+  output_file: output/sprint1/locale.py
+
+t4_lake_geometry_model:
+  agent: model_engineer
+  description: >
+    Escribe el modelo SQLAlchemy `LakeGeometry` para AztecApp.
+
+    Guarda los POLÍGONOS del lago de Tenochtitlan que la app superpone sobre el
+    mapa actual de la CDMX. Sustituye al modelo antiguo LakeView, que guardaba
+    puntos sueltos y no servía para dibujar un overlay.
+
+    Empieza el archivo exactamente con estas tres líneas:
+      from geoalchemy2 import Geography
+      from app.extensions import db
+      from datetime import datetime
+
+    Clase LakeGeometry, hereda de db.Model, __tablename__ = 'lake_geometries'.
+
+    Columnas, en este orden:
+      id                 db.String(36), primary_key=True
+      name               db.String(255), nullable=False
+      geom               db.Column(Geography(geometry_type='POLYGON', srid=4326, spatial_index=True), nullable=False)
+      year_estimate      db.Integer
+      tenochtitlan_name  db.String(255)
+      description        db.Text
+      created_at         db.DateTime, default=datetime.utcnow
+
+    NO declares __table_args__ y NO declares ningún db.Index. geoalchemy2 crea
+    el índice GiST por su cuenta a partir de spatial_index=True; añadirlo a
+    mano crearía un índice duplicado sobre la misma columna.
+
+    No añadas un método to_dict: la geometría se serializa a GeoJSON en el
+    service con ST_AsGeoJSON, no en el modelo.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después.
+  output_file: output/sprint1/lake_geometry_model.py
+
+t5_place_geom_column:
+  agent: model_engineer
+  description: >
+    Escribe un fragmento de modelo SQLAlchemy que añade una columna geográfica
+    al modelo Place de AztecApp.
+
+    Place ya tiene las columnas latitude y longitude, ambas db.Float, y se
+    conservan. La columna nueva las duplica en formato geográfico para poder
+    usar un índice espacial y consultas ST_DWithin.
+
+    Empieza el archivo exactamente con estas dos líneas:
+      from geoalchemy2 import Geography
+      from app.extensions import db
+
+    Después escribe SOLO esta definición, sin envolverla en una clase, precedida
+    por un comentario de dos líneas que explique para qué sirve la columna y por
+    qué se conservan latitude y longitude:
+
+      geom = db.Column(Geography(geometry_type='POINT', srid=4326, spatial_index=True), nullable=True)
+
+    NO declares __table_args__ y NO declares ningún db.Index. geoalchemy2 crea
+    el índice GiST por su cuenta a partir de spatial_index=True; añadirlo a
+    mano crearía un índice duplicado sobre la misma columna.
+
+    No escribas la clase Place completa. No escribas las demás columnas.
+    No escribas ningún método.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después.
+  output_file: output/sprint1/place_geom.py
+
+t6_translated_serializer:
+  agent: service_developer
+  description: >
+    Escribe el helper que aplica traducciones a un diccionario ya serializado
+    en AztecApp.
+
+    Empieza el archivo exactamente con estas dos líneas:
+      from typing import Any, Dict, List
+      from app.shared.translations_repository import TranslationRepository
+
+    Función 1:
+      apply_translation(data: Dict[str, Any], entity_type: str, locale: str,
+                        fields: Dict[str, str]) -> Dict[str, Any]
+      `data` es lo que devolvió to_dict(), y su clave 'id' es el entity_id.
+      `fields` mapea el nombre de la columna al nombre de la clave del
+      diccionario, por ejemplo {"name": "name", "description": "description"}.
+      Llama a TranslationRepository.find_for_entity(entity_type, data["id"], locale).
+      Para cada par columna/clave de `fields`: si la columna aparece en el
+      resultado, sobrescribe data[clave] con la traducción; si no aparece, deja
+      el valor original intacto, porque el texto en español es el fallback.
+      Devuelve data.
+
+    Función 2:
+      apply_translations(items: List[Dict[str, Any]], entity_type: str,
+                         locale: str, fields: Dict[str, str]) -> List[Dict[str, Any]]
+      Versión para listas. Reúne todos los items["id"] en una lista y hace UNA
+      sola llamada a TranslationRepository.find_for_entities. Después recorre
+      los items aplicando a cada uno lo que le corresponda.
+      Es importante que solo haya una consulta: llamar a apply_translation
+      dentro de un bucle provocaría un N+1 en los listados.
+      Si `items` está vacío, devuélvelo tal cual sin consultar nada.
+
+    No importes Flask. No importes el modelo Translation directamente.
+  expected_output: >
+    Únicamente código Python válido. Sin ``` de apertura ni de cierre.
+    Sin explicaciones antes ni después.
+  output_file: output/sprint1/translated_serializer.py
