@@ -1,0 +1,2328 @@
+info:
+  description: 'API de AztecApp Explorer.
+
+
+    **El sobre.** Todas las respuestas viajan envueltas: `{"success": true, "data":
+    {...}}`
+
+    en el camino feliz y `{"success": false, "error": "...", "details": {...}}` cuando
+    algo
+
+    falla. El cliente debe desenvolver `data`.
+
+
+    **Acceso.** El producto vende un DESBLOQUEO ÚNICO de 15 USD que no caduca; no
+    hay
+
+    niveles ni suscripción. Los endpoints públicos aceptan token opcional: sin él
+    —o con
+
+    uno revocado— responden 200 con el contenido en versión teaser, no 401. Eso es
+
+    deliberado: la app tiene que poder pintar el candado.
+
+
+    **Qué se paga y qué no.** La logística de cada sitio (tarifa de taquilla, horarios,
+
+    cómo llegar, avisos de seguridad) viaja SIEMPRE: son datos del mundo real y esconderlos
+
+    solo manda al viajero a buscarlos fuera. Lo que va detrás del desbloqueo es lo
+    que
+
+    escribimos nosotros: descripciones, `whyVisit`, contexto histórico y el audio
+    de los
+
+    tours.
+
+
+    **Idioma.** `Accept-Language` se compara por prefijo de dos letras (`es-MX` →
+    `es`).
+
+    El idioma base es el inglés y vive en las columnas del modelo; el español entra
+    por la
+
+    tabla de traducciones. Si una cuenta tiene `preferredLocale`, manda sobre la cabecera.'
+  title: AztecApp Explorer API
+  version: 1.0.0
+servers:
+- url: http://localhost:5001
+  description: Backend local
+- url: http://localhost:4010
+  description: Mock de Prism
+tags:
+- name: users
+  description: Cuentas, sesión y perfil.
+- name: places
+  description: 'Sitios: Explore, Near y Saved.'
+- name: tours
+  description: Recorridos autoguiados y su avance.
+- name: historical
+  description: Guía histórica y overlay del lago.
+- name: payments
+  description: El desbloqueo único.
+paths:
+  /api/users/register:
+    post:
+      tags:
+      - users
+      summary: Crear una cuenta
+      description: Cuenta completa con contraseña. Devuelve la pareja de tokens ya
+        lista, sin obligar a un login extra.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Cuenta creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Email inválido o contraseña de menos de 8 caracteres
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: El email ya está registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/login:
+    post:
+      tags:
+      - users
+      summary: Iniciar sesión
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas o cuenta desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/refresh:
+    post:
+      tags:
+      - users
+      summary: Renovar el access token
+      description: Requiere el REFRESH token en la cabecera. Un access token aquí
+        responde 401.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Token nuevo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessTokenResponse'
+        '401':
+          description: Falta el refresh token, o se mandó un access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/logout:
+    post:
+      tags:
+      - users
+      summary: Cerrar sesión
+      description: 'Mete el jti en la blocklist: el token deja de valer al instante,
+        no cuando caduque.'
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Sesión cerrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/profile:
+    get:
+      tags:
+      - users
+      summary: Perfil de la cuenta
+      security: &id001
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Sin token o token revocado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - users
+      summary: Editar el perfil
+      description: Lista blanca estricta. Un campo fuera de ella devuelve 400 en vez
+        de ignorarse en silencio.
+      security: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Campo no editable o valor inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/users/location-permission:
+    post:
+      tags:
+      - users
+      summary: Registrar la respuesta al permiso de ubicación
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationPermissionRequest'
+      responses:
+        '200':
+          description: Registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Valor inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/places/:
+    get:
+      tags:
+      - places
+      summary: Listado de sitios (pestaña Explore)
+      description: 'Token opcional: sin él la respuesta llega en versión teaser, con
+        200. Con sesión, cada sitio trae `isSaved` resuelto en la misma consulta.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: curation
+        in: query
+        schema:
+          type: string
+          enum:
+          - must_see
+          - quick_stop
+        description: Filtros de la barra de Explore. Un valor desconocido se ignora.
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Sitios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceListResponse'
+  /api/places/nearby:
+    get:
+      tags:
+      - places
+      summary: Sitios cercanos, con distancia
+      description: 'Ordenados por cercanía con ST_DWithin y ST_Distance. La distancia
+        llega calculada en `location.distanceKm`: no la recalcules en el cliente.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: latitude
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: longitude
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: radius
+        in: query
+        schema:
+          type: number
+          default: 5
+        description: Kilómetros.
+      - name: curation
+        in: query
+        schema:
+          type: string
+          enum:
+          - must_see
+          - quick_stop
+        description: Filtros de la barra de Explore. Un valor desconocido se ignora.
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Sitios cercanos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceListResponse'
+        '400':
+          description: Faltan latitude o longitude
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/places/recommended:
+    get:
+      tags:
+      - places
+      summary: Sitios recomendados alrededor
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: latitude
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: longitude
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Recomendados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceListResponse'
+        '400':
+          description: Faltan coordenadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/places/saved:
+    get:
+      tags:
+      - places
+      summary: Sitios guardados (pestaña Saved)
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Guardados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceListResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/places/{place_id}:
+    get:
+      tags:
+      - places
+      summary: Ficha de un sitio
+      description: 'Bloqueada: llegan metadata y logística, no el contenido. Desbloqueada:
+        llega todo.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Ficha
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceResponse'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/places/{place_id}/save:
+    post:
+      tags:
+      - places
+      summary: Guardar un sitio
+      description: 'Idempotente: guardarlo dos veces no duplica nada.'
+      security: &id002
+      - bearerAuth: []
+      parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Guardado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - places
+      summary: Quitar un sitio de guardados
+      security: *id002
+      parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Quitado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No estaba guardado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/tours/:
+    get:
+      tags:
+      - tours
+      summary: Listado de tours
+      description: 'Los bloqueados salen como teaser en vez de desaparecer: si no,
+        nadie llega a ver qué ofrece pagar.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Tours
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourListResponse'
+  /api/tours/free:
+    get:
+      tags:
+      - tours
+      summary: Tours gratuitos
+      responses:
+        '200':
+          description: Tours gratuitos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourListResponse'
+  /api/tours/user/tours:
+    get:
+      tags:
+      - tours
+      summary: Mis tours, con su avance
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Tours empezados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserTourListResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/tours/{tour_id}:
+    get:
+      tags:
+      - tours
+      summary: Ficha de un tour
+      description: '`stops` solo viaja con el desbloqueo. El teaser conserva `stopsCount`
+        e `includesAudio` para pintar el candado.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: tour_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Ficha del tour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourResponse'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/tours/{tour_id}/start:
+    post:
+      tags:
+      - tours
+      summary: Empezar un tour
+      description: 403 si el tour es de pago y la cuenta no tiene el desbloqueo. Repetirlo
+        devuelve el progreso existente.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: tour_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: Tour iniciado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourProgressResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Hace falta el desbloqueo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/tours/{tour_id}/progress:
+    put:
+      tags:
+      - tours
+      summary: Reportar avance
+      description: '`isCompleted` NO se acepta aquí: cerrar un tour pasa por /complete.
+        Mandarlo devuelve 400.
+
+
+        Devuelve el avance COMPLETO tal como quedó guardado, no solo un id: el cliente
+        lee el estado del servidor en vez de fiarse del que acaba de mandar.'
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: tour_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TourProgressUpdateRequest'
+      responses:
+        '200':
+          description: Avance guardado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourProgressResponse'
+        '400':
+          description: Campo no permitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: El tour no está empezado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/tours/{tour_id}/complete:
+    post:
+      tags:
+      - tours
+      summary: Cerrar un tour
+      description: Mueve los contadores del perfil y del propio tour.
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: tour_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TourCompleteRequest'
+      responses:
+        '200':
+          description: Tour cerrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TourProgressResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: El tour no está empezado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/historical/chronology:
+    get:
+      tags:
+      - historical
+      summary: Cronología, en orden
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: timelineId
+        in: query
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículos ordenados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListResponse'
+  /api/historical/topics:
+    get:
+      tags:
+      - historical
+      summary: Temas con su número de artículos
+      responses:
+        '200':
+          description: Temas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicListResponse'
+  /api/historical/content:
+    get:
+      tags:
+      - historical
+      summary: Todos los artículos
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: contentType
+        in: query
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListResponse'
+  /api/historical/content/topic:
+    get:
+      tags:
+      - historical
+      summary: Artículos de un tema
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: topic
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListResponse'
+        '400':
+          description: Falta el tema
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/historical/content/era:
+    get:
+      tags:
+      - historical
+      summary: Artículos de una época
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: era
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListResponse'
+        '400':
+          description: Falta la época
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/historical/content/place/{place_id}:
+    get:
+      tags:
+      - historical
+      summary: Artículos ligados a un sitio
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentListResponse'
+  /api/historical/content/{content_id}:
+    get:
+      tags:
+      - historical
+      summary: Un artículo
+      description: 'Sin el desbloqueo llega la ficha sin cuerpo: título, de qué va
+        y cuánto se tarda, pero no el texto. `nextContentId` alimenta el botón Next.'
+      security:
+      - {}
+      - bearerAuth: []
+      parameters:
+      - name: content_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: Accept-Language
+        in: header
+        required: false
+        schema:
+          type: string
+          example: es-MX
+        description: 'Se compara por prefijo de dos letras. Soportados: en, es.'
+      responses:
+        '200':
+          description: Artículo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoricalContentResponse'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/historical/content/{content_id}/read:
+    post:
+      tags:
+      - historical
+      summary: Marcar como leído
+      security: &id003
+      - bearerAuth: []
+      parameters:
+      - name: content_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Marcado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - historical
+      summary: Desmarcar
+      security: *id003
+      parameters:
+      - name: content_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Desmarcado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No estaba marcado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/historical/timelines:
+    get:
+      tags:
+      - historical
+      summary: Cronologías disponibles
+      responses:
+        '200':
+          description: Cronologías
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineListResponse'
+  /api/historical/lake-view:
+    get:
+      tags:
+      - historical
+      summary: Overlay del lago de Tenochtitlan
+      description: 'FeatureCollection GeoJSON, lista para pintar sin transformarla.
+
+
+        Los Features llegan en ORDEN DE PINTADO: primero el agua, encima la tierra.
+        Cada uno declara su `surfaceType` (`water` o `land`), que es lo que decide
+        el color — no lo deduzcas del nombre.
+
+
+        `year=2026` devuelve la colección VACÍA a propósito: el diseño enseña el mapa
+        de Google sin capa, y el overlay es lo que se añade al pasar a 1500.'
+      parameters:
+      - name: year
+        in: query
+        schema:
+          type: integer
+          enum:
+          - 1500
+          - 2026
+        description: El conmutador del mapa.
+      - name: bbox
+        in: query
+        schema:
+          type: string
+        example: -99.2,19.3,-99.0,19.5
+        description: 'minLon,minLat,maxLon,maxLat. Recorta con ST_Intersects: un polígono
+          que entra por una esquina también se devuelve.'
+      responses:
+        '200':
+          description: Overlay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LakeOverlayResponse'
+        '400':
+          description: bbox mal formado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/payments/access:
+    get:
+      tags:
+      - payments
+      summary: ¿Tiene esta cuenta el desbloqueo?
+      description: Lo que la app consulta al abrir para saber si pinta candados.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Estado de acceso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessStateResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/payments/purchases:
+    get:
+      tags:
+      - payments
+      summary: Historial de compras
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Compras
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseListResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/payments/checkout:
+    post:
+      tags:
+      - payments
+      summary: Abrir una compra
+      description: 'Devuelve la compra pendiente para arrancar el pago. Llamarlo dos
+        veces devuelve la MISMA, no crea otra. 409 si la cuenta ya tiene el desbloqueo:
+        no caduca, así que una segunda compra siempre es un error.'
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Compra abierta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseResponse'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: La cuenta ya tiene acceso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/payments/confirm:
+    post:
+      tags:
+      - payments
+      summary: Confirmar el cobro y conceder el acceso
+      description: 'Idempotente por (provider, externalId): un webhook repetido encuentra
+        la compra en vez de duplicarla.
+
+
+        **501 mientras la pasarela no esté implementada.** Aceptar un recibo sin comprobarlo
+        contra el proveedor sería regalar el contenido a cualquiera que mande una
+        petición inventada.'
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseConfirmRequest'
+      responses:
+        '200':
+          description: Acceso concedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurchaseResponse'
+        '400':
+          description: Cuerpo inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: El proveedor todavía no verifica cobros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+openapi: 3.0.3
+components:
+  schemas:
+    Location:
+      type: object
+      properties:
+        latitude:
+          type: number
+        longitude:
+          type: number
+        neighborhood:
+          type: string
+          nullable: true
+        distanceKm:
+          type: number
+          nullable: true
+      required:
+      - latitude
+      - longitude
+      additionalProperties: false
+    Badges:
+      type: object
+      properties:
+        freeEntry:
+          type: boolean
+        outdoor:
+          type: boolean
+        archaeological:
+          type: boolean
+      required:
+      - archaeological
+      - freeEntry
+      - outdoor
+      additionalProperties: false
+    ContentAccess:
+      type: object
+      properties:
+        isLocked:
+          type: boolean
+        unlockedForViewer:
+          type: boolean
+      required:
+      - isLocked
+      - unlockedForViewer
+      additionalProperties: false
+    NearbyServices:
+      type: object
+      properties:
+        bathrooms:
+          type: boolean
+          nullable: true
+        cafes:
+          type: boolean
+          nullable: true
+        hotels:
+          type: boolean
+          nullable: true
+      additionalProperties: false
+    EntryFee:
+      type: object
+      properties:
+        mxn:
+          type: number
+          nullable: true
+        usd:
+          type: number
+          nullable: true
+        text:
+          type: string
+          nullable: true
+        isFree:
+          type: boolean
+      required:
+      - isFree
+      additionalProperties: false
+    HistoricalContext:
+      type: object
+      properties:
+        tenochtitlanName:
+          type: string
+          nullable: true
+        eraDescription:
+          type: string
+          nullable: true
+      additionalProperties: false
+    Place:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tagline:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        location:
+          $ref: '#/components/schemas/Location'
+        placeType:
+          type: string
+          nullable: true
+        curation:
+          type: string
+          enum:
+          - must_see
+          - quick_stop
+          - null
+          description: Catálogo editorial. Alimenta los filtros de Explore.
+          nullable: true
+        rating:
+          type: number
+          description: Valoración editorial nuestra, no media de usuarios.
+          nullable: true
+        historicalSignificance:
+          type: string
+          nullable: true
+        estimatedVisitDuration:
+          type: integer
+          description: Minutos. Ordena y filtra.
+          nullable: true
+        visitDurationText:
+          type: string
+          description: 'Lo que se muestra: ''2-4 hours''. Un entero no dice eso.'
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        badges:
+          $ref: '#/components/schemas/Badges'
+        contentAccess:
+          $ref: '#/components/schemas/ContentAccess'
+        nearbyServices:
+          $ref: '#/components/schemas/NearbyServices'
+        isSaved:
+          type: boolean
+          description: 'El corazón. null sin sesión: no es false, es que no aplica.'
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          nullable: true
+        openingHours:
+          type: string
+          nullable: true
+        howToGetThere:
+          type: string
+          nullable: true
+        entryFee:
+          $ref: '#/components/schemas/EntryFee'
+        safetyRecommendations:
+          type: string
+          nullable: true
+        whyVisit:
+          type: string
+          nullable: true
+        historicalContext:
+          $ref: '#/components/schemas/HistoricalContext'
+        contentVerifiedAt:
+          type: string
+          nullable: true
+      required:
+      - badges
+      - contentAccess
+      - id
+      - location
+      - name
+      - nearbyServices
+      additionalProperties: false
+    PlaceList:
+      type: object
+      properties:
+        places:
+          type: array
+          items:
+            $ref: '#/components/schemas/Place'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        count:
+          type: integer
+      required:
+      - places
+      additionalProperties: false
+    TourAudio:
+      type: object
+      properties:
+        url:
+          type: string
+          description: null si la parada está bloqueada para quien mira.
+          nullable: true
+        durationSeconds:
+          type: integer
+          nullable: true
+        isLocked:
+          type: boolean
+      required:
+      - isLocked
+      additionalProperties: false
+    TourStop:
+      type: object
+      properties:
+        id:
+          type: string
+        position:
+          type: integer
+          description: Orden del recorrido, empezando en 0.
+        placeId:
+          type: string
+        transitionText:
+          type: string
+          nullable: true
+        audio:
+          $ref: '#/components/schemas/TourAudio'
+        place:
+          $ref: '#/components/schemas/Place'
+      required:
+      - audio
+      - id
+      - placeId
+      - position
+      additionalProperties: false
+    LastLocation:
+      type: object
+      properties:
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+      additionalProperties: false
+    TourProgress:
+      type: object
+      properties:
+        id:
+          type: string
+        tourId:
+          type: string
+        currentStopIndex:
+          type: integer
+          nullable: true
+        isCompleted:
+          type: boolean
+        rating:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        startedAt:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          nullable: true
+        lastLocation:
+          $ref: '#/components/schemas/LastLocation'
+        updatedAt:
+          type: string
+          nullable: true
+      required:
+      - id
+      - isCompleted
+      - lastLocation
+      - tourId
+      additionalProperties: false
+    TourStatistics:
+      type: object
+      properties:
+        views:
+          type: integer
+          nullable: true
+        completions:
+          type: integer
+          nullable: true
+      additionalProperties: false
+    UserTourProgress:
+      type: object
+      properties:
+        isCompleted:
+          type: boolean
+        currentStopIndex:
+          type: integer
+          nullable: true
+        rating:
+          type: integer
+          nullable: true
+        startedAt:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          nullable: true
+      required:
+      - isCompleted
+      additionalProperties: false
+    Tour:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        isFree:
+          type: boolean
+          nullable: true
+        isLocked:
+          type: boolean
+          nullable: true
+        unlockedForViewer:
+          type: boolean
+        estimatedDuration:
+          type: integer
+          nullable: true
+        durationText:
+          type: string
+          nullable: true
+        difficultyLevel:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        totalDistance:
+          type: number
+          nullable: true
+        hasEntryFees:
+          type: boolean
+        stopsCount:
+          type: integer
+        includesAudio:
+          type: boolean
+        rating:
+          type: number
+          nullable: true
+        statistics:
+          $ref: '#/components/schemas/TourStatistics'
+        createdAt:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          nullable: true
+        contentDescription:
+          type: string
+          description: El guion. Solo con el desbloqueo.
+          nullable: true
+        stops:
+          type: array
+          description: 'Las paradas. Solo con el desbloqueo: el teaser conserva stopsCount
+            e includesAudio para poder pintar el candado.'
+          items:
+            $ref: '#/components/schemas/TourStop'
+        progress:
+          description: 'Solo en GET /tours/user/tours. Es un bloque reducido: el avance
+            completo lo devuelven /start, /progress y /complete.'
+          allOf:
+          - $ref: '#/components/schemas/UserTourProgress'
+      required:
+      - id
+      - title
+      additionalProperties: false
+    TourList:
+      type: object
+      properties:
+        tours:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tour'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        count:
+          type: integer
+      required:
+      - tours
+      additionalProperties: false
+    HistoricalContent:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        contentType:
+          type: string
+          nullable: true
+        era:
+          type: string
+          nullable: true
+        topic:
+          type: string
+          nullable: true
+        dateDescription:
+          type: string
+          nullable: true
+        readingTimeMinutes:
+          type: integer
+          nullable: true
+        timelineId:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+          nullable: true
+        placeId:
+          type: string
+          nullable: true
+        isLocked:
+          type: boolean
+        unlockedForViewer:
+          type: boolean
+        isRead:
+          type: boolean
+          description: null sin sesión.
+          nullable: true
+        author:
+          type: string
+          nullable: true
+        verified:
+          type: boolean
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+        nextContentId:
+          type: string
+          description: El botón Next de la cronología. Solo en el detalle.
+          nullable: true
+        content:
+          type: string
+          description: El texto. Solo desbloqueado.
+        audioUrl:
+          type: string
+        videoUrl:
+          type: string
+        sources: {}
+      required:
+      - id
+      - isLocked
+      - title
+      - unlockedForViewer
+      additionalProperties: false
+    Topic:
+      type: object
+      properties:
+        topic:
+          type: string
+        count:
+          type: integer
+      required:
+      - count
+      - topic
+      additionalProperties: false
+    Timeline:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+      required:
+      - id
+      - title
+      additionalProperties: false
+    GeoJSONGeometry:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+          - Polygon
+        coordinates:
+          description: Anillos de [longitud, latitud], como manda GeoJSON.
+      required:
+      - coordinates
+      - type
+      additionalProperties: false
+    LakeFeatureProperties:
+      type: object
+      properties:
+        name:
+          type: string
+        surfaceType:
+          type: string
+          enum:
+          - water
+          - land
+          description: Con qué color se pinta. El mapa de 1500 tiene lago azul e islas
+            en arena, y el color no se deduce del nombre.
+        yearEstimate:
+          type: integer
+          nullable: true
+        tenochtitlanName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+      required:
+      - name
+      - surfaceType
+      additionalProperties: false
+    LakeFeature:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+          - Feature
+        id:
+          type: string
+        geometry:
+          $ref: '#/components/schemas/GeoJSONGeometry'
+        properties:
+          $ref: '#/components/schemas/LakeFeatureProperties'
+      required:
+      - geometry
+      - id
+      - properties
+      - type
+      additionalProperties: false
+    LakeOverlay:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+          - FeatureCollection
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/LakeFeature'
+        availableYears:
+          type: array
+          description: Años que tienen geometría sembrada. Con esto la app construye
+            el conmutador en vez de llevar 1500 y 2026 escritos a fuego.
+          items:
+            type: integer
+      required:
+      - features
+      - type
+      additionalProperties: false
+    UserStats:
+      type: object
+      properties:
+        toursCompleted:
+          type: integer
+        placesVisited:
+          type: integer
+      required:
+      - placesVisited
+      - toursCompleted
+      additionalProperties: false
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        preferredLocale:
+          type: string
+          enum:
+          - en
+          - es
+          - null
+          description: Manda sobre Accept-Language y viaja entre dispositivos. null
+            mientras la cuenta no haya elegido en ajustes.
+          nullable: true
+        hasFullAccess:
+          type: boolean
+        fullAccessSince:
+          type: string
+          nullable: true
+        locationPermissionStatus:
+          type: string
+          nullable: true
+        stats:
+          $ref: '#/components/schemas/UserStats'
+        isVerified:
+          type: boolean
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+      required:
+      - email
+      - hasFullAccess
+      - id
+      - stats
+      additionalProperties: false
+    Auth:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+      - accessToken
+      - refreshToken
+      - user
+      additionalProperties: false
+    AccessToken:
+      type: object
+      properties:
+        accessToken:
+          type: string
+      required:
+      - accessToken
+      additionalProperties: false
+    AccessState:
+      type: object
+      properties:
+        hasFullAccess:
+          type: boolean
+        since:
+          type: string
+          nullable: true
+        product:
+          type: string
+        price:
+          type: number
+        currency:
+          type: string
+      required:
+      - currency
+      - hasFullAccess
+      - price
+      - product
+      additionalProperties: false
+    Purchase:
+      type: object
+      properties:
+        id:
+          type: string
+        product:
+          type: string
+        provider:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum:
+          - pending
+          - completed
+          - failed
+          - refunded
+        purchasedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+      required:
+      - amount
+      - currency
+      - id
+      - product
+      - status
+      additionalProperties: false
+    PurchaseList:
+      type: object
+      properties:
+        purchases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Purchase'
+      required:
+      - purchases
+      additionalProperties: false
+    LocationPermission:
+      type: object
+      properties:
+        locationPermissionStatus:
+          type: string
+          nullable: true
+        lastPrompted:
+          type: string
+          nullable: true
+      additionalProperties: false
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        firstName:
+          type: string
+        lastName:
+          type: string
+      required:
+      - email
+      - password
+      additionalProperties: false
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+      - email
+      - password
+      additionalProperties: false
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        avatarUrl:
+          type: string
+        preferredLocale:
+          type: string
+          enum:
+          - en
+          - es
+      additionalProperties: false
+    LocationPermissionRequest:
+      type: object
+      properties:
+        response:
+          type: string
+          enum:
+          - granted
+          - denied
+        context:
+          type: string
+          nullable: true
+      required:
+      - response
+      additionalProperties: false
+    TourProgressUpdateRequest:
+      type: object
+      properties:
+        currentStopIndex:
+          type: integer
+        lastLocationLat:
+          type: number
+        lastLocationLon:
+          type: number
+        notes:
+          type: string
+      additionalProperties: false
+    TourCompleteRequest:
+      type: object
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        notes:
+          type: string
+      additionalProperties: false
+    PurchaseConfirmRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum:
+          - stripe
+          - apple
+          - google
+          - manual
+        externalId:
+          type: string
+          description: La referencia del proveedor. Se verifica contra él antes de
+            conceder nada; no se cree por venir aquí.
+      required:
+      - externalId
+      - provider
+      additionalProperties: false
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        error:
+          type: string
+        details:
+          description: Errores por campo cuando la validación falla.
+      required:
+      - error
+      - success
+      additionalProperties: false
+    PlaceResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/Place'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    PlaceListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/PlaceList'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    TourResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/Tour'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    TourListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/TourList'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    TourProgressResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/TourProgress'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    HistoricalContentResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/HistoricalContent'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    UserResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/User'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/Auth'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    AccessTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/AccessToken'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    AccessStateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/AccessState'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    PurchaseResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/Purchase'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    PurchaseListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/PurchaseList'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    LakeOverlayResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/LakeOverlay'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    LocationPermissionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          $ref: '#/components/schemas/LocationPermission'
+        message:
+          type: string
+      required:
+      - success
+      - data
+    ContentListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/HistoricalContent'
+            count:
+              type: integer
+          required:
+          - content
+      required:
+      - success
+      - data
+    TopicListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          type: object
+          properties:
+            topics:
+              type: array
+              items:
+                $ref: '#/components/schemas/Topic'
+          required:
+          - topics
+      required:
+      - success
+      - data
+    TimelineListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          type: object
+          properties:
+            timelines:
+              type: array
+              items:
+                $ref: '#/components/schemas/Timeline'
+          required:
+          - timelines
+      required:
+      - success
+      - data
+    UserTourListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        data:
+          type: object
+          properties:
+            tours:
+              type: array
+              items:
+                $ref: '#/components/schemas/Tour'
+            count:
+              type: integer
+          required:
+          - tours
+      required:
+      - success
+      - data
+    MessageResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - true
+        message:
+          type: string
+        data:
+          type: object
+          nullable: true
+      required:
+      - success
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

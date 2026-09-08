@@ -1,0 +1,11 @@
+# Lo que no tiene por qué entrar en la imagen.
+.git
+.gitignore
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+.env
+aztec_crew

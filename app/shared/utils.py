@@ -1,6 +1,6 @@
 """Utility functions shared across modules"""
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple, Dict, Any
 import re
 
@@ -98,3 +98,29 @@ def format_response(
     response.update(kwargs)
     
     return response
+
+
+def utc_ahora() -> datetime:
+    """El instante actual en UTC, sin zona horaria.
+
+    Sustituye a `datetime.utcnow()`, que Python 3.12 marcó como deprecado y
+    acabará quitando. Devuelve EXACTAMENTE lo mismo: un datetime naíf que
+    representa UTC.
+
+    Lo de "naíf" no es descuido, es lo que exige el esquema: las columnas son
+    `DateTime` sin zona, así que meterles un datetime con tzinfo daría
+    comparaciones inconsistentes entre lo que se escribe y lo que se lee.
+    Cuando toque pasar a columnas con zona horaria, se cambia aquí y en la
+    migración, en un solo sitio.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def utc_desde_timestamp(segundos: float) -> datetime:
+    """Convierte un timestamp UNIX a datetime naíf en UTC.
+
+    Sustituye a `datetime.utcfromtimestamp()`, deprecado en 3.12 por la misma
+    razón que utcnow: devolvía un datetime naíf sin decir en qué zona estaba.
+    Aquí sí se dice: es UTC, como el `exp` de un JWT.
+    """
+    return datetime.fromtimestamp(segundos, timezone.utc).replace(tzinfo=None)

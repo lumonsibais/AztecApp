@@ -10,9 +10,10 @@ def test_get_all_timelines(client):
     assert data["success"] is True
 
 
-def test_get_lake_data(client):
-    """Test getting lake view data"""
-    response = client.get("/api/historical/lake-view?latitude=19.43&longitude=-99.13")
+def test_get_lake_overlay(client):
+    """El overlay del lago sale como GeoJSON, con o sin encuadre."""
+    response = client.get("/api/historical/lake-view")
     assert response.status_code == 200
     data = response.get_json()
     assert data["success"] is True
+    assert data["data"]["type"] == "FeatureCollection"

@@ -52,6 +52,22 @@ class TourRepository:
         return tour
     
     @staticmethod
+    def increment_completions(tour_id: str) -> None:
+        """Suma uno a las finalizaciones del tour."""
+        tour = TourRepository.find_by_id(tour_id)
+        if tour is not None:
+            tour.completion_count = (tour.completion_count or 0) + 1
+            db.session.commit()
+
+    @staticmethod
+    def increment_views(tour_id: str) -> None:
+        """Suma una visita a la ficha del tour."""
+        tour = TourRepository.find_by_id(tour_id)
+        if tour is not None:
+            tour.views_count = (tour.views_count or 0) + 1
+            db.session.commit()
+
+    @staticmethod
     def delete(tour_id: str) -> bool:
         """Delete a tour"""
         tour = TourRepository.find_by_id(tour_id)
