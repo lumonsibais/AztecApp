@@ -158,6 +158,11 @@ def seed_places():
     for datos in SITIOS:
         campos = dict(datos)
         traducciones = campos.pop("es", {})
+        # is_published explícito. El modelo tiene default false —un sitio nuevo
+        # nace en borrador y se publica cuando está listo—, así que sin esta
+        # línea la siembra deja el catálogo entero invisible: la app arranca
+        # vacía, sin un solo error, en cualquier instalación limpia.
+        campos.setdefault("is_published", True)
         place = Place(**campos)
         db.session.add(place)
         creados.append((place, traducciones))

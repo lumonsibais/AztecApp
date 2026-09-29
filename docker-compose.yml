@@ -53,9 +53,26 @@ services:
       FLASK_ENV: development
       SECRET_KEY: dev-solo-para-desarrollo
       JWT_SECRET_KEY: dev-solo-para-desarrollo
-      # La pasarela no está implementada y /confirm responde 501. En local se
-      # salta la verificación para poder probar el desbloqueo; en cualquier
-      # entorno de verdad esto va en false y no se discute.
+      # Credenciales de las tiendas. Vacías en local a propósito: mientras
+      # PAYMENTS_ALLOW_UNVERIFIED esté encendido no se usan, y así no hay ni un
+      # secreto de verdad en un fichero versionado. Para probar contra las
+      # tiendas de verdad se apaga esa línea y se rellenan estas en un .env.
+      APPLE_BUNDLE_ID: "${APPLE_BUNDLE_ID:-}"
+      APPLE_ISSUER_ID: "${APPLE_ISSUER_ID:-}"
+      APPLE_KEY_ID: "${APPLE_KEY_ID:-}"
+      APPLE_PRIVATE_KEY: "${APPLE_PRIVATE_KEY:-}"
+      APPLE_PRODUCT_ID: "${APPLE_PRODUCT_ID:-}"
+      # Encendido hace falta para las cuentas de prueba y DURANTE LA REVISIÓN de
+      # Apple; apagado en producción una vez publicada la app.
+      APPLE_ALLOW_SANDBOX: "${APPLE_ALLOW_SANDBOX:-true}"
+      GOOGLE_PACKAGE_NAME: "${GOOGLE_PACKAGE_NAME:-}"
+      GOOGLE_PRODUCT_ID: "${GOOGLE_PRODUCT_ID:-}"
+      GOOGLE_SERVICE_ACCOUNT_JSON: "${GOOGLE_SERVICE_ACCOUNT_JSON:-}"
+      STORE_WEBHOOK_SECRET: "${STORE_WEBHOOK_SECRET:-}"
+      # Sin credenciales de tienda /confirm respondería 402 y no habría forma de
+      # ver la app desbloqueada en local. Con esto encendido se concede el
+      # acceso SIN preguntarle a nadie, así que en cualquier entorno de verdad
+      # va en false y no se discute.
       PAYMENTS_ALLOW_UNVERIFIED: "true"
     ports:
       # 5001 en el anfitrión, no 5000. Dos motivos, y los dos son reales en

@@ -64,6 +64,15 @@ class Place(db.Model):
     # Acceso: un único desbloqueo, sin niveles.
     is_locked = db.Column(db.Boolean, default=False)
 
+    # Visible en la app, o todavía en el taller.
+    #
+    # No es lo mismo que `is_locked`: un sitio bloqueado SÍ sale en Explore
+    # —con su candado, que es donde ocurre la conversión— mientras que uno sin
+    # publicar no existe para la app. Cargar un catálogo son varias sesiones de
+    # escribir, y una ficha a medias no debería estar en la calle mientras
+    # tanto.
+    is_published = db.Column(db.Boolean, default=False, nullable=False, index=True)
+
     # Información práctica
     opening_hours = db.Column(db.String(255))
     # Las entradas se cobran en pesos y hay que poder mostrarlas también en
@@ -139,6 +148,7 @@ class Place(db.Model):
                 'isLocked': bool(self.is_locked),
                 'unlockedForViewer': unlocked,
             },
+            'isPublished': bool(self.is_published),
             'nearbyServices': {
                 'bathrooms': self.has_bathrooms,
                 'cafes': self.has_cafes,

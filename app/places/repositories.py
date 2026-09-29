@@ -10,11 +10,27 @@ from app.places.models import Place
 
 class PlaceRepository:
     """Repository for Place model operations"""
-    
+
     @staticmethod
-    def find_by_id(place_id: str) -> Optional[Place]:
-        """Find place by ID"""
-        return Place.query.filter_by(id=place_id).first()
+    def publicos():
+        """La consulta base de todo lo que ve la app: solo lo publicado.
+
+        Existe para que filtrar sea lo que se hace por defecto y haya que
+        pedir lo contrario a propósito. Al revés —filtrar a mano en cada
+        consulta— el día que alguien añada una nueva se le olvida, y el fallo
+        es que los borradores del equipo aparecen en producción.
+        """
+        return Place.query.filter(Place.is_published.is_(True))
+
+    @staticmethod
+    def find_by_id(place_id: str, incluir_borradores: bool = False) -> Optional[Place]:
+        """Un sitio por su id.
+
+        Por defecto solo los publicados. La administración pide `True` para
+        poder editar lo que todavía no está en la calle.
+        """
+        consulta = Place.query if incluir_borradores else PlaceRepository.publicos()
+        return consulta.filter(Place.id == place_id).first()
     
     @staticmethod
     def find_all(
@@ -25,7 +41,7 @@ class PlaceRepository:
         `curation` es lo que alimenta las pestañas "Must See" y "Quick Stops"
         de Explore.
         """
-        query = Place.query
+        query = PlaceRepository.publicos()
         if curation:
             query = query.filter(Place.curation == curation)
 
@@ -36,7 +52,9 @@ class PlaceRepository:
     @staticmethod
     def find_by_type(place_type: str) -> List[Place]:
         """Find places by type"""
-        return Place.query.filter_by(place_type=place_type).all()
+        return PlaceRepository.publicos().filter(
+            Place.place_type == place_type
+        ).all()
     
     @staticmethod
     def _punto(latitude: float, longitude: float):
@@ -64,7 +82,7 @@ class PlaceRepository:
         """
         punto = PlaceRepository._punto(user_latitude, user_longitude)
 
-        query = Place.query.filter(
+        query = PlaceRepository.publicos().filter(
             Place.geom.isnot(None)
         ).filter(
             func.ST_DWithin(Place.geom, punto, float(radius_km) * 1000.0)
@@ -95,6 +113,8 @@ class PlaceRepository:
         distancia = func.ST_Distance(Place.geom, punto)
 
         query = db.session.query(Place, distancia.label("metros")).filter(
+            Place.is_published.is_(True)
+        ).filter(
             Place.geom.isnot(None)
         ).filter(
             func.ST_DWithin(Place.geom, punto, float(radius_km) * 1000.0)

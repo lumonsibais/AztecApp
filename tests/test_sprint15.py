@@ -31,6 +31,7 @@ def auth(tokens):
 def crear_place(pid, nombre="Templo Mayor", bloqueado=False, curacion=None,
                 lat=None, lon=None, **extra):
     place = Place(
+        is_published=True,
         id=pid, name=nombre, description="Body", tagline="One line hook",
         latitude=lat if lat is not None else TEMPLO_MAYOR[0],
         longitude=lon if lon is not None else TEMPLO_MAYOR[1],
@@ -114,14 +115,18 @@ def test_el_checkout_no_deja_filas_muertas(client, app):
 
 
 def test_sin_verificacion_no_se_concede_nada(client, app):
-    """La costura del proveedor está sin implementar: debe negarse, no confiar."""
+    """Un recibo que la tienda no confirma no desbloquea nada.
+
+    Devolvía 501 cuando no había ninguna pasarela implementada. Ahora el cobro
+    por las tiendas sí lo está, así que lo que falla es ESTE recibo: 402.
+    """
     app.config["PAYMENTS_ALLOW_UNVERIFIED"] = False
     tokens = registrar(client, "listo@example.com")
 
     r = client.post("/api/payments/confirm",
                     json={"provider": "stripe", "externalId": "pi_falso"},
                     headers=auth(tokens))
-    assert r.status_code == 501
+    assert r.status_code == 402
 
     estado = client.get("/api/payments/access", headers=auth(tokens)).get_json()["data"]
     assert estado["hasFullAccess"] is False

@@ -11,6 +11,7 @@ def test_get_nearby_places(client, app):
     with app.app_context():
         # Create test place
         place = Place(
+            is_published=True,
             id=str(uuid.uuid4()),
             name="Test Place",
             description="Test description",

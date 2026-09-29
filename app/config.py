@@ -38,6 +38,45 @@ class Config:
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
     STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 
+    # ---------------------------------------------------------------
+    # Cobro desde las tiendas
+    # ---------------------------------------------------------------
+    # El desbloqueo se compra dentro de la app, así que quien cobra es Apple o
+    # Google y el servidor solo verifica recibos. Nada de esto tiene valor por
+    # defecto: sin credenciales, /payments/confirm responde 402 diciendo que el
+    # cobro no está configurado, que es mejor que conceder accesos a ciegas.
+
+    # App Store. La clave es un .p8 de App Store Connect (Users and Access ->
+    # Integrations -> In-App Purchase). Se descarga UNA sola vez.
+    APPLE_BUNDLE_ID = os.getenv("APPLE_BUNDLE_ID", "")
+    APPLE_ISSUER_ID = os.getenv("APPLE_ISSUER_ID", "")
+    APPLE_KEY_ID = os.getenv("APPLE_KEY_ID", "")
+    APPLE_PRIVATE_KEY = os.getenv("APPLE_PRIVATE_KEY", "")        # contenido del .p8
+    APPLE_PRIVATE_KEY_PATH = os.getenv("APPLE_PRIVATE_KEY_PATH", "")
+    APPLE_PRODUCT_ID = os.getenv("APPLE_PRODUCT_ID", "")
+
+    # Aceptar compras de sandbox. Hace falta encendido para probar con cuentas
+    # de prueba y DURANTE LA REVISIÓN de Apple, porque el revisor compra en
+    # sandbox contra el binario de producción. Apagado en el servidor de
+    # producción una vez publicada la app: si no, un recibo de sandbox —que
+    # cualquiera puede generarse gratis— desbloquea la app de verdad.
+    APPLE_ALLOW_SANDBOX = (
+        os.getenv("APPLE_ALLOW_SANDBOX", "").lower() in ("1", "true", "yes")
+    )
+
+    # Google Play. La cuenta de servicio se crea en Google Cloud y se le da
+    # acceso a la app en Play Console; necesita permiso para ver datos
+    # financieros o la API de compras responde 401.
+    GOOGLE_PACKAGE_NAME = os.getenv("GOOGLE_PACKAGE_NAME", "")
+    GOOGLE_PRODUCT_ID = os.getenv("GOOGLE_PRODUCT_ID", "")
+    GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    GOOGLE_SERVICE_ACCOUNT_PATH = os.getenv("GOOGLE_SERVICE_ACCOUNT_PATH", "")
+
+    # Secreto opcional en la URL de los webhooks de las tiendas. No es lo que
+    # los protege —eso lo hace no fiarse del cuerpo de la notificación—, solo
+    # evita que un curioso nos haga consultar la API de las tiendas a su gusto.
+    STORE_WEBHOOK_SECRET = os.getenv("STORE_WEBHOOK_SECRET", "")
+
     # Puerta de desarrollo del cobro. Con esto en true, /payments/confirm
     # concede el acceso SIN comprobar el recibo contra el proveedor, que es lo
     # único que permite probar la app desbloqueada mientras no haya pasarela.

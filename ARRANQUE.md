@@ -110,8 +110,9 @@ solo: **no hace falta reconstruir** para cambiar código Python. Solo si tocas
 
 ## Probar el desbloqueo de 15 USD
 
-En local, `PAYMENTS_ALLOW_UNVERIFIED` está en `true` y `/confirm` concede el
-acceso sin pasarela. Sirve para ver la app con todo desbloqueado:
+El cobro se hace desde las tiendas, y en tu máquina no hay ninguna. Por eso
+`PAYMENTS_ALLOW_UNVERIFIED` está en `true` en local: `/confirm` concede el acceso
+sin preguntarle a Apple ni a Google. Sirve para ver la app con todo desbloqueado:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:5001/api/users/register \
@@ -121,7 +122,7 @@ TOKEN=$(curl -s -X POST http://localhost:5001/api/users/register \
 
 curl -s -X POST http://localhost:5001/api/payments/confirm \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"provider":"stripe","externalId":"pi_prueba"}'
+  -d '{"provider":"apple","externalId":"recibo_de_prueba"}'
 ```
 
 En cualquier entorno que no sea tu máquina, esa variable va en `false`: con ella

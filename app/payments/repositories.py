@@ -28,6 +28,43 @@ class PurchaseRepository:
         ).first()
 
     @staticmethod
+    def find_by_store_reference(provider: str, referencia: str) -> Optional[Purchase]:
+        """Busca por cualquiera de las dos referencias de la tienda.
+
+        Las notificaciones de reembolso no siempre traen la misma referencia que
+        la compra: Apple manda el originalTransactionId y Google el orderId.
+        Buscar solo por `external_id` dejaría sin revocar justo los casos en los
+        que hay dinero devuelto.
+        """
+        if not referencia:
+            return None
+        return Purchase.query.filter(
+            Purchase.provider == provider,
+            db.or_(
+                Purchase.external_id == referencia,
+                Purchase.original_transaction_id == referencia,
+            ),
+        ).first()
+
+    @staticmethod
+    def find_sin_acuse(provider: str, limit: int = 200) -> List[Purchase]:
+        """Compras cobradas a las que todavía no se ha acusado recibo.
+
+        Google las reembolsa solas a los 3 días. Esta consulta es la red que
+        recoge las que se quedaron atrás porque la llamada de acuse falló.
+        """
+        return (
+            Purchase.query.filter(
+                Purchase.provider == provider,
+                Purchase.status == PURCHASE_COMPLETED,
+                Purchase.acknowledged_at.is_(None),
+            )
+            .order_by(Purchase.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
     def find_by_user(user_id: str, limit: int = 50) -> List[Purchase]:
         return (
             Purchase.query.filter_by(user_id=user_id)

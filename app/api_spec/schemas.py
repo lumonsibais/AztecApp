@@ -103,6 +103,14 @@ class PlaceSchema(Schema):
     imageUrl = fields.Str(allow_none=True)
     badges = fields.Nested(BadgesSchema, required=True)
     contentAccess = fields.Nested(ContentAccessSchema, required=True)
+    isPublished = fields.Bool(required=True, metadata={
+        "description": "Si el sitio está en el catálogo público. Distinto de "
+                       "`contentAccess.isLocked`: un sitio bloqueado SÍ sale "
+                       "en Explore —con su candado— mientras que uno sin "
+                       "publicar no existe para la app. Los endpoints "
+                       "públicos solo devuelven publicados, así que ahí "
+                       "siempre llega true.",
+    })
     nearbyServices = fields.Nested(NearbyServicesSchema, required=True)
     isSaved = fields.Bool(allow_none=True, metadata={
         "description": "El corazón. null sin sesión: no es false, es que no aplica.",
@@ -347,6 +355,10 @@ class UserSchema(Schema):
     })
     hasFullAccess = fields.Bool(required=True)
     fullAccessSince = fields.Str(allow_none=True)
+    isAdmin = fields.Bool(metadata={
+        "description": "Puede escribir en el catálogo. Se concede desde la "
+                       "consola del servidor, nunca por la API.",
+    })
     locationPermissionStatus = fields.Str(allow_none=True)
     stats = fields.Nested(UserStatsSchema, required=True)
     isVerified = fields.Bool(allow_none=True)
