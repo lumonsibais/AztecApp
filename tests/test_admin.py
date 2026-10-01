@@ -526,3 +526,146 @@ def test_la_siembra_deja_el_catalogo_publicado(client, app):
     places = client.get("/api/places/").get_json()["data"]["places"]
     assert places, "la siembra dejó el catálogo invisible"
     assert len(places) == 4
+
+
+# --------------------------------------------------------------------------
+# galería, zona del tour y minutos a pie
+#
+# Los tres huecos que destapó el diseño de Figma al leerlo contra el contrato.
+# --------------------------------------------------------------------------
+
+FOTOS = [
+    {"url": "https://cdn.example/1.jpg", "caption": "Desde la calle",
+     "position": 0},
+    {"url": "https://cdn.example/2.jpg", "position": 1},
+    {"url": "https://cdn.example/3.jpg", "caption": "El detalle",
+     "position": 2},
+]
+
+
+def test_la_galeria_llega_en_orden(client, app):
+    a = admin(client)
+    r = client.post("/api/admin/places",
+                    json={**SITIO_MINIMO, "images": FOTOS}, headers=auth(a))
+    assert r.status_code == 201, r.get_json()
+
+    fotos = client.get(f"/api/places/{SITIO_MINIMO['id']}").get_json()
+    # El sitio nace en borrador, así que no sale por la ruta pública todavía.
+    assert fotos["success"] is False
+
+    datos = r.get_json()["data"]
+    assert [f["url"] for f in datos["images"]] == [f["url"] for f in FOTOS]
+    assert datos["images"][0]["caption"] == "Desde la calle"
+    assert datos["images"][1]["caption"] is None
+
+
+def test_sin_galeria_images_trae_la_portada(client, app):
+    """Así el cliente puede usar SIEMPRE `images` sin preguntarse por imageUrl."""
+    a = admin(client)
+    r = client.post("/api/admin/places",
+                    json={**SITIO_MINIMO,
+                          "image_url": "https://cdn.example/portada.jpg"},
+                    headers=auth(a))
+
+    datos = r.get_json()["data"]
+    assert datos["imageUrl"] == "https://cdn.example/portada.jpg"
+    assert datos["images"] == [
+        {"url": "https://cdn.example/portada.jpg", "caption": None}]
+
+
+def test_sin_foto_ninguna_images_llega_vacia(client, app):
+    a = admin(client)
+    r = client.post("/api/admin/places", json=SITIO_MINIMO, headers=auth(a))
+    assert r.get_json()["data"]["images"] == []
+
+
+def test_no_mandar_images_deja_la_galeria_como_estaba(client, app):
+    """None y [] no son lo mismo, y la diferencia se nota al editar."""
+    a = admin(client)
+    client.post("/api/admin/places",
+                json={**SITIO_MINIMO, "images": FOTOS}, headers=auth(a))
+
+    # Una edición que no menciona las fotos.
+    r = client.put(f"/api/admin/places/{SITIO_MINIMO['id']}",
+                   json={"name": "Otro nombre"}, headers=auth(a))
+    assert r.status_code == 200
+    assert len(r.get_json()["data"]["images"]) == 3
+
+    # Y una que las vacía a propósito.
+    r = client.put(f"/api/admin/places/{SITIO_MINIMO['id']}",
+                   json={"images": []}, headers=auth(a))
+    assert r.get_json()["data"]["images"] == []
+
+
+def test_dos_fotos_en_la_misma_posicion_dan_400(client, app):
+    """400 con el motivo, no un 500 de integridad que nadie sabe leer."""
+    a = admin(client)
+    r = client.post("/api/admin/places", json={
+        **SITIO_MINIMO,
+        "images": [
+            {"url": "https://cdn.example/1.jpg", "position": 0},
+            {"url": "https://cdn.example/2.jpg", "position": 0},
+        ],
+    }, headers=auth(a))
+
+    assert r.status_code == 400
+    assert "images" in r.get_json()["details"]
+
+
+def test_la_zona_y_los_minutos_a_pie_van_y_vuelven(client, app):
+    a = admin(client)
+    client.post("/api/admin/places", json=SITIO_MINIMO, headers=auth(a))
+    client.post("/api/admin/places",
+                json={**SITIO_MINIMO, "id": "sitio-dos", "name": "Second"},
+                headers=auth(a))
+
+    r = client.post("/api/admin/tours", json={
+        "id": "paseo-nuevo",
+        "title": "A walk",
+        "description": "Body",
+        "estimated_duration": 90,
+        "neighborhood": "Centro Histórico",
+        "stops": [
+            {"place_id": SITIO_MINIMO["id"], "position": 0,
+             "walk_minutes_to_next": 3},
+            {"place_id": "sitio-dos", "position": 1},
+        ],
+    }, headers=auth(a))
+    assert r.status_code == 201, r.get_json()
+
+    datos = r.get_json()["data"]
+    assert datos["neighborhood"] == "Centro Histórico"
+    assert datos["stops"][0]["walkMinutesToNext"] == 3
+    # La última parada no lleva a ninguna otra.
+    assert datos["stops"][1]["walkMinutesToNext"] is None
+
+
+def test_los_minutos_a_pie_viajan_con_el_tour_bloqueado(client, app):
+    """Son logística, como la taquilla de un museo.
+
+    Lo que se paga es el guion y el audio. Saber que hay tres minutos de camino
+    entre dos plazas no es contenido nuestro, y esconderlo solo empeora la app
+    de quien todavía no ha comprado.
+    """
+    from app.tours.models import Tour, TourStop
+
+    db.session.add(Place(
+        id="p-tour", name="Stop", description="B", latitude=19.4, longitude=-99.1,
+        place_type="ruin", historical_significance="S",
+        estimated_visit_duration=30, is_published=True))
+    db.session.add(Tour(id="tour-pago", title="Paid", description="B",
+                        estimated_duration=60, is_locked=True, is_free=False,
+                        status="published"))
+    db.session.flush()
+    db.session.add(TourStop(id="s1", tour_id="tour-pago", place_id="p-tour",
+                            position=0, walk_minutes_to_next=7,
+                            transition_text="Secreto",
+                            audio_url="https://cdn.example/a.mp3"))
+    db.session.commit()
+
+    parada = db.session.get(TourStop, "s1").to_dict(unlocked=False)
+
+    assert parada["walkMinutesToNext"] == 7     # logística: viaja
+    assert parada["transitionText"] is None     # guion: no viaja
+    assert parada["audio"]["url"] is None       # audio: no viaja
+    assert parada["audio"]["isLocked"] is True

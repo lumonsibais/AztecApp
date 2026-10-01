@@ -27,6 +27,14 @@ class _Base(Schema):
         unknown = "raise"
 
 
+class FotoSchema(_Base):
+    """Una foto de la galería de un sitio."""
+
+    url = fields.Url(required=True, validate=validate.Length(max=500))
+    caption = fields.Str(validate=validate.Length(max=255), allow_none=True)
+    position = fields.Int(required=True, validate=validate.Range(min=0))
+
+
 class TraduccionPlaceSchema(_Base):
     """Los campos de un sitio que tiene sentido traducir."""
     name = fields.Str(validate=validate.Length(min=1, max=255))
@@ -74,6 +82,14 @@ class PlaceCrearSchema(_Base):
     archaeological = fields.Bool()
     visit_duration_text = fields.Str(validate=validate.Length(max=255))
     image_url = fields.Url(validate=validate.Length(max=500))
+
+    # La galería del carrusel. Se manda entera y sustituye a la anterior, igual
+    # que las paradas de un tour: quien edita una ficha la tiene delante
+    # completa, y así no existen los estados intermedios con dos fotos en la
+    # misma posición. Mandar `images: []` vacía la galería; no mandarla la deja
+    # como estaba.
+    images = fields.List(fields.Nested(FotoSchema))
+
     is_locked = fields.Bool()
     is_published = fields.Bool()
     opening_hours = fields.Str(validate=validate.Length(max=255))
@@ -95,6 +111,15 @@ class PlaceCrearSchema(_Base):
         keys=fields.Str(validate=validate.OneOf(LOCALES_TRADUCIBLES)),
         values=fields.Nested(TraduccionPlaceSchema),
     )
+
+    @validates_schema
+    def _fotos_sin_repetir(self, data, **kwargs):
+        """La base lo impediría con su UNIQUE, pero con un 500 en vez de un 400."""
+        posiciones = [f["position"] for f in (data.get("images") or [])]
+        repetida = next((x for x in posiciones if posiciones.count(x) > 1), None)
+        if repetida is not None:
+            raise ValidationError(
+                f"La posición {repetida} está repetida entre las fotos.", "images")
 
     @validates_schema
     def _tarifa_coherente(self, data, **kwargs):
@@ -131,6 +156,10 @@ class TourParadaSchema(_Base):
         validate=validate.Range(min=0), allow_none=True)
     transition_text = fields.Str(allow_none=True)
 
+    # Minutos andando hasta la parada siguiente. La última los deja sin poner.
+    walk_minutes_to_next = fields.Int(
+        validate=validate.Range(min=0, max=24 * 60), allow_none=True)
+
 
 class TraduccionTourSchema(_Base):
     title = fields.Str(validate=validate.Length(min=1, max=255))
@@ -153,6 +182,7 @@ class TourCrearSchema(_Base):
     content_description = fields.Str()
     duration_text = fields.Str(validate=validate.Length(max=120))
     difficulty_level = fields.Str(validate=validate.OneOf(["easy", "medium", "hard"]))
+    neighborhood = fields.Str(validate=validate.Length(max=120))
     image_url = fields.Url(validate=validate.Length(max=500))
     total_distance = fields.Float(validate=validate.Range(min=0), allow_none=True)
     has_entry_fees = fields.Bool()

@@ -1946,6 +1946,18 @@ components:
           type: string
           nullable: true
       additionalProperties: false
+    PlaceImage:
+      type: object
+      properties:
+        url:
+          type: string
+        caption:
+          type: string
+          description: 'Pie de foto. Opcional: la mayoría no lo necesita.'
+          nullable: true
+      required:
+      - url
+      additionalProperties: false
     Place:
       type: object
       properties:
@@ -1989,7 +2001,16 @@ components:
           nullable: true
         imageUrl:
           type: string
+          description: 'La PORTADA. Se conserva por compatibilidad: estaba en el contrato
+            antes de que existiera la galería.'
           nullable: true
+        images:
+          type: array
+          description: 'La galería del carrusel, en orden, con la portada la primera.
+            Cuando no hay galería pero sí portada, trae esa sola: usa SIEMPRE este
+            campo y nunca llegará vacío habiendo foto.'
+          items:
+            $ref: '#/components/schemas/PlaceImage'
         badges:
           $ref: '#/components/schemas/Badges'
         contentAccess:
@@ -2085,6 +2106,12 @@ components:
           type: string
         transitionText:
           type: string
+          nullable: true
+        walkMinutesToNext:
+          type: integer
+          description: 'Minutos andando HASTA LA PARADA SIGUIENTE. La última lo trae
+            null. Es logística, así que viaja también con el tour bloqueado: lo que
+            se paga es el guion y el audio, no saber cuánto se camina.'
           nullable: true
         audio:
           $ref: '#/components/schemas/TourAudio'
@@ -2200,6 +2227,10 @@ components:
           nullable: true
         difficultyLevel:
           type: string
+          nullable: true
+        neighborhood:
+          type: string
+          description: 'La zona por la que transcurre: ''Centro Histórico''.'
           nullable: true
         imageUrl:
           type: string
@@ -3001,6 +3032,24 @@ components:
           nullable: true
       required:
       - success
+    Foto:
+      type: object
+      properties:
+        url:
+          type: string
+          format: url
+          maxLength: 500
+        caption:
+          type: string
+          maxLength: 255
+          nullable: true
+        position:
+          type: integer
+          minimum: 0
+      required:
+      - position
+      - url
+      additionalProperties: false
     TraduccionPlace:
       type: object
       properties:
@@ -3098,6 +3147,10 @@ components:
           type: string
           format: url
           maxLength: 500
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/Foto'
         is_locked:
           type: boolean
         is_published:
@@ -3207,6 +3260,10 @@ components:
           type: string
           format: url
           maxLength: 500
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/Foto'
         is_locked:
           type: boolean
         is_published:
@@ -3262,6 +3319,11 @@ components:
         transition_text:
           type: string
           nullable: true
+        walk_minutes_to_next:
+          type: integer
+          minimum: 0
+          maximum: 1440
+          nullable: true
       required:
       - place_id
       - position
@@ -3314,6 +3376,9 @@ components:
           - easy
           - medium
           - hard
+        neighborhood:
+          type: string
+          maxLength: 120
         image_url:
           type: string
           format: url
@@ -3380,6 +3445,9 @@ components:
           - easy
           - medium
           - hard
+        neighborhood:
+          type: string
+          maxLength: 120
         image_url:
           type: string
           format: url

@@ -11,7 +11,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.historical.models import HistoricalContent, LakeGeometry
-from app.places.models import Place
+from app.places.models import Place, PlaceImage
 from app.places.repositories import PlaceRepository
 from app.shared.translations import (
     ENTITY_HISTORICAL,
@@ -51,16 +51,41 @@ def _guardar_traducciones(entidad: str, entidad_id: str, traducciones: Dict[str,
 class AdminPlaceService:
 
     @staticmethod
+    def _reemplazar_fotos(place: Place, fotos: List[Dict[str, Any]]):
+        """La galería se manda entera y sustituye a la anterior.
+
+        Mismo trato que las paradas de un tour, y por lo mismo: quien edita una
+        ficha tiene el carrusel delante completo, y un parcheo foto a foto deja
+        estados intermedios con dos en la misma posición.
+
+        Se borra y se inserta dentro de la MISMA transacción: si algo falla al
+        insertar, el sitio no se queda sin fotos.
+        """
+        import uuid
+
+        PlaceImage.query.filter_by(place_id=place.id).delete()
+        for foto in fotos:
+            db.session.add(
+                PlaceImage(id=str(uuid.uuid4()), place_id=place.id, **foto))
+
+    @staticmethod
     def crear(datos: Dict[str, Any]) -> Place:
         campos, traducciones = _repartir(datos)
+        fotos = campos.pop("images", None)
 
         if Place.query.filter_by(id=campos["id"]).first():
             raise YaExiste(campos["id"])
 
         place = Place(**campos)
         db.session.add(place)
-        db.session.commit()
+        # flush y no commit: la galería necesita el id del sitio, y las dos
+        # cosas tienen que entrar o no entrar juntas.
+        db.session.flush()
 
+        if fotos is not None:
+            AdminPlaceService._reemplazar_fotos(place, fotos)
+
+        db.session.commit()
         _guardar_traducciones(ENTITY_PLACE, place.id, traducciones)
         return place
 
@@ -74,9 +99,16 @@ class AdminPlaceService:
 
         campos, traducciones = _repartir(datos)
         campos.pop("id", None)
+        # None y [] NO son lo mismo: no mandar `images` deja la galería como
+        # estaba, mandarla vacía la borra. Por eso se mira la clave y no el
+        # valor.
+        fotos = campos.pop("images", None)
 
         for campo, valor in campos.items():
             setattr(place, campo, valor)
+
+        if fotos is not None:
+            AdminPlaceService._reemplazar_fotos(place, fotos)
 
         db.session.commit()
         _guardar_traducciones(ENTITY_PLACE, place.id, traducciones)

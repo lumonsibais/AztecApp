@@ -139,6 +139,12 @@ class Place(db.Model):
             'estimatedVisitDuration': self.estimated_visit_duration,
             'visitDurationText': self.visit_duration_text,
             'imageUrl': self.image_url,
+            # La galería. `imageUrl` sigue siendo la portada y no se toca —está
+            # en el contrato congelado y la app la lee—; `images` es la lista
+            # completa, con la portada la primera. Cuando no hay galería pero sí
+            # portada, `images` trae esa sola: así el cliente puede usar SIEMPRE
+            # `images` y nunca le llega vacía habiendo foto.
+            'images': self.galeria(),
             'badges': {
                 'freeEntry': bool(self.is_free_entry),
                 'outdoor': bool(self.is_outdoor),
@@ -196,6 +202,60 @@ class Place(db.Model):
             })
 
         return data
+
+    def galeria(self):
+        """La portada y las demás fotos, en orden."""
+        fotos = [
+            {"url": i.url, "caption": i.caption}
+            for i in sorted(self.images, key=lambda i: i.position)
+        ]
+        if not fotos and self.image_url:
+            return [{"url": self.image_url, "caption": None}]
+        return fotos
+
+
+class PlaceImage(db.Model):
+    """Una foto de la galería de un sitio.
+
+    Tabla y no una columna con un array porque el diseño las pasa en carrusel y
+    cada una lleva su pie: eso es una fila con sus campos, no una cadena dentro
+    de otra. Además así se reordenan sin reescribir las demás.
+
+    El pie es opcional a propósito: la mayoría de las fotos no lo necesitan, y
+    obligar a escribir uno acaba produciendo pies que repiten el nombre del
+    sitio.
+    """
+
+    __tablename__ = "place_images"
+
+    id = db.Column(db.String(36), primary_key=True)
+    place_id = db.Column(
+        db.String(36), db.ForeignKey("places.id"), nullable=False, index=True
+    )
+
+    url = db.Column(db.String(500), nullable=False)
+    caption = db.Column(db.String(255))
+
+    # Orden dentro del carrusel. Único por sitio: dos fotos en la misma posición
+    # saldrían en orden arbitrario, que es justo lo que esto evita.
+    position = db.Column(db.Integer, nullable=False, default=0)
+
+    created_at = db.Column(db.DateTime, default=utc_ahora)
+
+    place = db.relationship(
+        "Place",
+        backref=db.backref(
+            "images",
+            # Borrar el sitio se lleva sus fotos: una foto sin sitio no es nada.
+            # (Hoy no hay borrado de sitios en la API; esto es por si lo hay.)
+            cascade="all, delete-orphan",
+            order_by="PlaceImage.position",
+        ),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("place_id", "position", name="uq_place_image_pos"),
+    )
 
 
 def _sincronizar_geom(mapper, connection, target):
