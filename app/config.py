@@ -1,21 +1,57 @@
 """Flask application configuration"""
 import os
+import pathlib
 from datetime import timedelta
+
+# El `.env` se carga AQUÍ, y aquí por una razón concreta: las clases de abajo
+# leen `os.getenv` al definirse, es decir al importar este módulo. Cargarlo más
+# tarde —en `create_app`, por ejemplo— llegaría tarde y la configuración ya
+# tendría los valores por defecto.
+#
+# Y se carga en este archivo, no en `run.py`, porque `run.py` no es la única
+# puerta de entrada: `flask db upgrade`, `pytest`, `seed.py` y `smoke.py` entran
+# cada uno por su lado y todos pasan por aquí. python-dotenv ya está en
+# requirements; el Flask CLI lo usa solo, pero los otros cuatro no, y esa
+# asimetría es la que hacía que la misma orden funcionara o no según cómo la
+# arrancaras.
+#
+# Si no hay `.env`, no pasa nada: los valores por defecto de abajo son los que
+# levanta `docker compose`, así que el camino corto sigue funcionando sin
+# configurar nada.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(pathlib.Path(__file__).resolve().parent.parent / ".env")
+except ImportError:  # pragma: no cover - python-dotenv está en requirements
+    pass
+
+
+# Los Postgres por defecto, con nombre propio para que un test pueda
+# contrastarlos contra `docker-compose.yml` sin depender de lo que haya en el
+# entorno: si se mirara `Config.SQLALCHEMY_DATABASE_URI`, un `.env` que apunte a
+# otra base haría fallar al test teniendo razón el `.env`.
+DEFAULT_DATABASE_URL = "postgresql://aztec:aztec@localhost:5432/aztec_explorer"
+DEFAULT_TEST_DATABASE_URL = \
+    "postgresql://aztec:aztec@localhost:5432/aztec_explorer_test"
 
 
 class Config:
     """Base configuration"""
-    
+
     # Flask
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
     DEBUG = False
     TESTING = False
     
     # Database
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/aztec_explorer"
-    )
+    #
+    # El valor por defecto es el que levanta `docker compose`, el mismo que
+    # `.env.example` y el mismo que usa `TestingConfig`. Antes decía
+    # `user:password`, que no existe en ninguna parte del proyecto: era herencia
+    # del andamio inicial, y el resultado era un `password authentication failed
+    # for user "user"` de cincuenta líneas de traza cada vez que alguien abría
+    # una terminal nueva sin exportar nada.
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # JWT
@@ -116,9 +152,7 @@ class TestingConfig(Config):
     """
     TESTING = True
     SQLALCHEMY_DATABASE_URI = os.getenv(
-        "TEST_DATABASE_URL",
-        "postgresql://aztec:aztec@localhost:5432/aztec_explorer_test",
-    )
+        "TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
 
 
 class ProductionConfig(Config):

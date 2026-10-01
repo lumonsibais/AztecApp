@@ -37,6 +37,40 @@ flutter pub get
 flutter run --dart-define=API_BASE=http://localhost:5001
 ```
 
+## El camino sin Docker: desde el venv
+
+A veces hace falta correr algo contra la base directamente —una migración, el
+seed, los tests— sin pasar por el contenedor de la API. Para eso basta con el
+Postgres de `docker compose`, que publica el **5432** al Mac:
+
+```bash
+docker compose up -d db          # solo la base, sin la API
+source .venv/bin/activate
+flask db upgrade
+pytest
+```
+
+No hace falta exportar nada: el valor por defecto de `app/config.py` apunta a
+ese mismo Postgres (`aztec:aztec@localhost:5432/aztec_explorer`), y los tests
+usan su propia base (`aztec_explorer_test`), así que correrlos no toca tus
+datos.
+
+Si quieres cambiar algo —otra base, otro puerto, las claves de JWT— copia el
+ejemplo y edítalo:
+
+```bash
+cp .env.example .env
+```
+
+Ese `.env` lo lee `app/config.py` al importarse, así que vale igual para
+`flask`, `pytest`, `seed.py`, `smoke.py` y `python run.py`. Antes solo lo leía
+el comando `flask`, y la misma orden funcionaba o no según por dónde entraras.
+
+> Si ves `password authentication failed for user "user"`, estás en una versión
+> anterior a este cambio: ese usuario no existe en ninguna parte del proyecto,
+> era un resto del andamio inicial. Exporta `DATABASE_URL` a mano o actualiza
+> la rama.
+
 ## A qué dirección apunta el front
 
 Esta es la parte que hace perder media hora, así que va aparte:
