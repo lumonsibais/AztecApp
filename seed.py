@@ -158,6 +158,11 @@ def seed_places():
     for datos in SITIOS:
         campos = dict(datos)
         traducciones = campos.pop("es", {})
+        # is_published explícito. El modelo tiene default false —un sitio nuevo
+        # nace en borrador y se publica cuando está listo—, así que sin esta
+        # línea la siembra deja el catálogo entero invisible: la app arranca
+        # vacía, sin un solo error, en cualquier instalación limpia.
+        campos.setdefault("is_published", True)
         place = Place(**campos)
         db.session.add(place)
         creados.append((place, traducciones))
@@ -189,6 +194,7 @@ def seed_tours(places):
         estimated_duration=105,
         duration_text="1 - 2 hours",
         difficulty_level="easy",
+        neighborhood="Centro Histórico",
         total_distance=2.4,
         has_entry_fees=False,
         editorial_rating=4.5,
@@ -198,15 +204,19 @@ def seed_tours(places):
 
     # El orden ES el recorrido: sin `position` las paradas salían arbitrarias,
     # que en un tour a pie es sencillamente estar perdido.
+    # El último número son los minutos andando HASTA LA PARADA SIGUIENTE; la
+    # última no lleva a ninguna otra y va en None. Son los que el diseño pinta
+    # en el conector entre dos tarjetas.
     recorrido = [
         ("monumento-mexicanidad", 0, 95,
-         "Next, let's go to the Aztec's sacred precinct."),
+         "Next, let's go to the Aztec's sacred precinct.", 12),
         ("templo-mayor", 1, 240,
-         "From the temple we walk north, to where the empire made its last stand."),
-        ("tlatelolco", 2, 180, None),
+         "From the temple we walk north, to where the empire made its last stand.",
+         18),
+        ("tlatelolco", 2, 180, None, None),
     ]
 
-    for place_id, posicion, duracion, transicion in recorrido:
+    for place_id, posicion, duracion, transicion, a_pie in recorrido:
         db.session.add(TourStop(
             id=str(uuid.uuid4()),
             tour_id=tour.id,
@@ -215,6 +225,7 @@ def seed_tours(places):
             audio_url=f"https://cdn.example/audio/{place_id}.mp3",
             audio_duration_seconds=duracion,
             transition_text=transicion,
+            walk_minutes_to_next=a_pie,
         ))
 
     db.session.commit()

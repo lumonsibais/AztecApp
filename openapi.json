@@ -34,6 +34,10 @@
     {
       "name": "payments",
       "description": "El desbloqueo único."
+    },
+    {
+      "name": "admin",
+      "description": "Escritura del catálogo. Cerrada con rol de administrador, que se concede desde la consola del servidor y nunca por la API."
     }
   ],
   "paths": {
@@ -1807,7 +1811,7 @@
           "payments"
         ],
         "summary": "Confirmar el cobro y conceder el acceso",
-        "description": "Idempotente por (provider, externalId): un webhook repetido encuentra la compra en vez de duplicarla.\n\n**501 mientras la pasarela no esté implementada.** Aceptar un recibo sin comprobarlo contra el proveedor sería regalar el contenido a cualquiera que mande una petición inventada.",
+        "description": "El cobro lo hace la tienda. `externalId` es el **transactionId** de StoreKit 2 (`provider: apple`) o el **purchaseToken** de Play Billing (`provider: google`), y el servidor lo comprueba contra Apple o Google antes de conceder nada: lo que manda el cliente no desbloquea por sí mismo.\n\nNo se manda el identificador del producto: solo hay uno y está en la configuración del servidor.\n\nIdempotente por (provider, externalId): el mismo recibo dos veces no duplica la compra.\n\n**402** cuando la tienda no confirma el cobro —recibo desconocido, compra reembolsada, pago pendiente, o el servidor sin credenciales de tienda—. **409** cuando el recibo ya está aplicado a otra cuenta.",
         "security": [
           {
             "bearerAuth": []
@@ -1854,8 +1858,946 @@
               }
             }
           },
-          "501": {
-            "description": "El proveedor todavía no verifica cobros",
+          "402": {
+            "description": "La tienda no confirma el cobro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El recibo ya está aplicado a otra cuenta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/restore": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Restaurar una compra anterior",
+        "description": "Lo que hay detrás del botón **Restore Purchases**, que Apple exige en toda app con producto no consumible: sin él, la revisión rechaza la entrega.\n\nCon cuerpo, el cliente manda la transacción que le ha devuelto la tienda y se verifica igual que una compra nueva. **Sin cuerpo**, se devuelve lo que ya conste a nombre de la cuenta, y 404 si nunca compró.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acceso restaurado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cuerpo inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "La tienda no confirma el cobro",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No consta ninguna compra que restaurar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El recibo ya está aplicado a otra cuenta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/webhooks/apple": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Notificaciones de la App Store",
+        "description": "App Store Server Notifications V2. Lo que de verdad importa aquí son los reembolsos: cuando Apple devuelve el dinero, nadie abre la app para avisarnos y sin esto la cuenta se quedaría con el contenido.\n\n**No lleva autenticación y no puede llevarla**: la llama la tienda. Lo que la hace segura es que el contenido de la notificación no decide nada: de él solo se saca el identificador de la compra y la verdad se pide después a la tienda por una conexión autenticada nuestra. Una notificación falsificada no concede ni revoca nada.\n\nResponde 200 también cuando ignora el aviso, para que la tienda no lo reintente; 500 solo si conviene reintentarlo.",
+        "responses": {
+          "200": {
+            "description": "Aviso procesado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno; la tienda reintentará",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/webhooks/google": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Notificaciones de Google Play",
+        "description": "Real-time developer notifications, entregadas por Pub/Sub. Igual que en Apple, lo que se atiende son las compras anuladas.\n\n**No lleva autenticación y no puede llevarla**: la llama la tienda. Lo que la hace segura es que el contenido de la notificación no decide nada: de él solo se saca el identificador de la compra y la verdad se pide después a la tienda por una conexión autenticada nuestra. Una notificación falsificada no concede ni revoca nada.\n\nResponde 200 también cuando ignora el aviso, para que la tienda no lo reintente; 500 solo si conviene reintentarlo.",
+        "responses": {
+          "200": {
+            "description": "Aviso procesado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno; la tienda reintentará",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/places": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Catálogo completo, borradores incluidos",
+        "description": "Al revés que el listado público: lo primero que necesita ver quien carga contenido es lo que tiene a medias.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catálogo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPlaceListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Crear un sitio",
+        "description": "Nace **en borrador**: no aparece en Explore hasta que se publica. El `id` lo pone quien escribe y tiene que ser legible (`templo-mayor`), porque acaba en las URLs.\n\nLas traducciones van en la misma llamada: cargar una ficha bilingüe en dos peticiones invita a dejar la segunda sin hacer.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlaceCrear"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sitio creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campo fuera de la lista blanca o valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya existe un sitio con ese id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/places/{place_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Editar un sitio",
+        "description": "Edición parcial: solo lo que se manda. El `id` no se puede cambiar — renombrar la clave rompería los guardados y las paradas de tour que apuntan a él.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "place_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlaceActualizar"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sitio actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campo no editable o valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe, o la cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tours": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Todos los tours con sus paradas",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tours",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTourListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Crear un tour con su recorrido",
+        "description": "Las paradas van en la misma llamada: un recorrido sin ellas no es nada, y mandarlas aparte deja la puerta a tours a medio montar.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTourCrear"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tour creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TourResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Posiciones repetidas o campo inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El id ya existe, o una parada apunta a un sitio que no existe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/tours/{tour_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Editar un tour",
+        "description": "Si se manda `stops`, **sustituye al recorrido entero**. Una lista vacía deja el tour sin paradas; no mencionarlas no las toca.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tour_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTourActualizar"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tour actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TourResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe, o la cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Una parada apunta a un sitio inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/content": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Todos los artículos",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artículos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Crear un artículo",
+        "description": "El cuerpo tiene que corresponder al tipo: uno de audio sin `audio_url` es una ficha que no se puede abrir.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminContenidoCrear"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Artículo creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalContentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta el cuerpo del tipo, o campo inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El id ya existe, o apunta a una cronología o un sitio inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/content/{content_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Editar un artículo",
+        "description": "Edición parcial. La coherencia entre tipo y cuerpo solo se comprueba si la actualización cambia el tipo: si no, corregir una errata del título obligaría a remandar el artículo entero.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "content_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminContenidoActualizar"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Artículo actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalContentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe, o la cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Apunta a algo que no existe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/lake-geometries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Polígonos del overlay",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Polígonos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLakeListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Cargar un polígono",
+        "description": "Va por API y no solo por el seed porque los trazados de verdad los va a ir afinando alguien con un mapa delante, y pedirle un despliegue por cada corrección garantiza que no se corrijan.\n\nEl anillo tiene que cerrarse: el último punto repite el primero.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLakeGeometria"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Polígono creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLakeCreadaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Geometría mal formada, o rechazada por PostGIS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "La cuenta no es de administrador",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/lake-geometries/{geometria_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Borrar un polígono",
+        "description": "El **único borrado real** de toda la API. Aquí sí y en el resto no, porque un polígono mal trazado no tiene nada colgando: nadie lo ha guardado en favoritos ni forma parte del recorrido de un tour. Un sitio o un artículo se retiran con `is_published` o `status`, que conserva lo que apunta a ellos.\n\nRequiere una cuenta de administrador. Quien no lo sea recibe **404**, no 403: confirmar la existencia de la ruta no aporta nada y sí ayuda a quien esté buscando por dónde entrar.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "geometria_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Borrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe, o la cuenta no es de administrador",
             "content": {
               "application/json": {
                 "schema": {
@@ -1987,6 +2929,23 @@
         },
         "additionalProperties": false
       },
+      "PlaceImage": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Pie de foto. Opcional: la mayoría no lo necesita.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
       "Place": {
         "type": "object",
         "properties": {
@@ -2042,13 +3001,25 @@
           },
           "imageUrl": {
             "type": "string",
+            "description": "La PORTADA. Se conserva por compatibilidad: estaba en el contrato antes de que existiera la galería.",
             "nullable": true
+          },
+          "images": {
+            "type": "array",
+            "description": "La galería del carrusel, en orden, con la portada la primera. Cuando no hay galería pero sí portada, trae esa sola: usa SIEMPRE este campo y nunca llegará vacío habiendo foto.",
+            "items": {
+              "$ref": "#/components/schemas/PlaceImage"
+            }
           },
           "badges": {
             "$ref": "#/components/schemas/Badges"
           },
           "contentAccess": {
             "$ref": "#/components/schemas/ContentAccess"
+          },
+          "isPublished": {
+            "type": "boolean",
+            "description": "Si el sitio está en el catálogo público. Distinto de `contentAccess.isLocked`: un sitio bloqueado SÍ sale en Explore —con su candado— mientras que uno sin publicar no existe para la app. Los endpoints públicos solo devuelven publicados, así que ahí siempre llega true."
           },
           "nearbyServices": {
             "$ref": "#/components/schemas/NearbyServices"
@@ -2097,6 +3068,7 @@
           "badges",
           "contentAccess",
           "id",
+          "isPublished",
           "location",
           "name",
           "nearbyServices"
@@ -2166,6 +3138,11 @@
           },
           "transitionText": {
             "type": "string",
+            "nullable": true
+          },
+          "walkMinutesToNext": {
+            "type": "integer",
+            "description": "Minutos andando HASTA LA PARADA SIGUIENTE. La última lo trae null. Es logística, así que viaja también con el tour bloqueado: lo que se paga es el guion y el audio, no saber cuánto se camina.",
             "nullable": true
           },
           "audio": {
@@ -2325,6 +3302,11 @@
           },
           "difficultyLevel": {
             "type": "string",
+            "nullable": true
+          },
+          "neighborhood": {
+            "type": "string",
+            "description": "La zona por la que transcurre: 'Centro Histórico'.",
             "nullable": true
           },
           "imageUrl": {
@@ -2712,6 +3694,10 @@
           "fullAccessSince": {
             "type": "string",
             "nullable": true
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Puede escribir en el catálogo. Se concede desde la consola del servidor, nunca por la API."
           },
           "locationPermissionStatus": {
             "type": "string",
@@ -3467,6 +4453,986 @@
         },
         "required": [
           "success"
+        ]
+      },
+      "Foto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 255,
+            "nullable": true
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "position",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "TraduccionPlace": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "tagline": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "historical_significance": {
+            "type": "string"
+          },
+          "why_visit": {
+            "type": "string"
+          },
+          "how_to_get_there": {
+            "type": "string"
+          },
+          "visit_duration_text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "entry_fee_text": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "opening_hours": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "safety_recommendations": {
+            "type": "string"
+          },
+          "era_description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminPlaceCrear": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90.0,
+            "maximum": 90.0
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180.0,
+            "maximum": 180.0
+          },
+          "place_type": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "historical_significance": {
+            "type": "string"
+          },
+          "estimated_visit_duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "tagline": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "neighborhood": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "curation": {
+            "type": "string",
+            "enum": [
+              "must_see",
+              "quick_stop",
+              null
+            ],
+            "nullable": true
+          },
+          "editorial_rating": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 5.0,
+            "nullable": true
+          },
+          "why_visit": {
+            "type": "string"
+          },
+          "how_to_get_there": {
+            "type": "string"
+          },
+          "tenochtitlan_name": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "era_description": {
+            "type": "string"
+          },
+          "archaeological": {
+            "type": "boolean"
+          },
+          "visit_duration_text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "image_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Foto"
+            }
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "is_published": {
+            "type": "boolean"
+          },
+          "opening_hours": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "entry_fee_mxn": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "entry_fee_usd": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "entry_fee_text": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "is_free_entry": {
+            "type": "boolean"
+          },
+          "is_outdoor": {
+            "type": "boolean"
+          },
+          "safety_recommendations": {
+            "type": "string"
+          },
+          "has_bathrooms": {
+            "type": "boolean"
+          },
+          "has_cafes": {
+            "type": "boolean"
+          },
+          "has_hotels": {
+            "type": "boolean"
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionPlace"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "estimated_visit_duration",
+          "historical_significance",
+          "id",
+          "latitude",
+          "longitude",
+          "name",
+          "place_type"
+        ],
+        "additionalProperties": false
+      },
+      "AdminPlaceActualizar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90.0,
+            "maximum": 90.0
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180.0,
+            "maximum": 180.0
+          },
+          "place_type": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "historical_significance": {
+            "type": "string"
+          },
+          "estimated_visit_duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "tagline": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "neighborhood": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "curation": {
+            "type": "string",
+            "enum": [
+              "must_see",
+              "quick_stop",
+              null
+            ],
+            "nullable": true
+          },
+          "editorial_rating": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 5.0,
+            "nullable": true
+          },
+          "why_visit": {
+            "type": "string"
+          },
+          "how_to_get_there": {
+            "type": "string"
+          },
+          "tenochtitlan_name": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "era_description": {
+            "type": "string"
+          },
+          "archaeological": {
+            "type": "boolean"
+          },
+          "visit_duration_text": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "image_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Foto"
+            }
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "is_published": {
+            "type": "boolean"
+          },
+          "opening_hours": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "entry_fee_mxn": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "entry_fee_usd": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "entry_fee_text": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "is_free_entry": {
+            "type": "boolean"
+          },
+          "is_outdoor": {
+            "type": "boolean"
+          },
+          "safety_recommendations": {
+            "type": "string"
+          },
+          "has_bathrooms": {
+            "type": "boolean"
+          },
+          "has_cafes": {
+            "type": "boolean"
+          },
+          "has_hotels": {
+            "type": "boolean"
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionPlace"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "TourParada": {
+        "type": "object",
+        "properties": {
+          "place_id": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "audio_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500,
+            "nullable": true
+          },
+          "audio_duration_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "transition_text": {
+            "type": "string",
+            "nullable": true
+          },
+          "walk_minutes_to_next": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1440,
+            "nullable": true
+          }
+        },
+        "required": [
+          "place_id",
+          "position"
+        ],
+        "additionalProperties": false
+      },
+      "TraduccionTour": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "content_description": {
+            "type": "string"
+          },
+          "duration_text": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminTourCrear": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "estimated_duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "content_description": {
+            "type": "string"
+          },
+          "duration_text": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "difficulty_level": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "neighborhood": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "image_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "total_distance": {
+            "type": "number",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "has_entry_fees": {
+            "type": "boolean"
+          },
+          "editorial_rating": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 5.0,
+            "nullable": true
+          },
+          "is_free": {
+            "type": "boolean"
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TourParada"
+            }
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionTour"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "estimated_duration",
+          "id",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "AdminTourActualizar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "estimated_duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "archived"
+            ]
+          },
+          "content_description": {
+            "type": "string"
+          },
+          "duration_text": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "difficulty_level": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ]
+          },
+          "neighborhood": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "image_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "total_distance": {
+            "type": "number",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "has_entry_fees": {
+            "type": "boolean"
+          },
+          "editorial_rating": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 5.0,
+            "nullable": true
+          },
+          "is_free": {
+            "type": "boolean"
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "stops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TourParada"
+            }
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionTour"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "TraduccionContenido": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "text_content": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "era": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "date_description": {
+            "type": "string",
+            "maxLength": 255
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminContenidoCrear": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio",
+              "video"
+            ]
+          },
+          "text_content": {
+            "type": "string"
+          },
+          "audio_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "video_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "timeline_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "sort_order": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "era": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "date_description": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "reading_time_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 180,
+            "nullable": true
+          },
+          "place_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "sources": {},
+          "verified": {
+            "type": "boolean"
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionContenido"
+            }
+          }
+        },
+        "required": [
+          "content_type",
+          "description",
+          "id",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "AdminContenidoActualizar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio",
+              "video"
+            ]
+          },
+          "text_content": {
+            "type": "string"
+          },
+          "audio_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "video_url": {
+            "type": "string",
+            "format": "url",
+            "maxLength": 500
+          },
+          "timeline_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "sort_order": {
+            "type": "integer",
+            "minimum": 0,
+            "nullable": true
+          },
+          "era": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "date_description": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "topic": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "reading_time_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 180,
+            "nullable": true
+          },
+          "place_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_locked": {
+            "type": "boolean"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "sources": {},
+          "verified": {
+            "type": "boolean"
+          },
+          "translations": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TraduccionContenido"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminLakeGeometria": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "surface_type": {
+            "type": "string",
+            "enum": [
+              "water",
+              "land"
+            ]
+          },
+          "geometry": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "year_estimate": {
+            "type": "integer",
+            "minimum": -5000,
+            "maximum": 3000
+          },
+          "tenochtitlan_name": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "geometry",
+          "name",
+          "surface_type"
+        ],
+        "additionalProperties": false
+      },
+      "AdminPlaceListResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "places": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Place"
+                }
+              },
+              "count": {
+                "type": "integer"
+              },
+              "drafts": {
+                "type": "integer",
+                "description": "Cuántos están sin publicar."
+              }
+            },
+            "required": [
+              "places"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ]
+      },
+      "AdminLakeListResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "geometries": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "surfaceType": {
+                      "type": "string",
+                      "enum": [
+                        "water",
+                        "land"
+                      ]
+                    },
+                    "yearEstimate": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "tenochtitlanName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              },
+              "count": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "geometries"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ]
+      },
+      "AdminLakeCreadaResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "surfaceType": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "data"
         ]
       }
     },

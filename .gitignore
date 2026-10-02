@@ -68,8 +68,15 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-migrations/versions/*.py
-!migrations/versions/.gitkeep
+# Las migraciones de Alembic SÍ van al repositorio.
+#
+# Estaban ignoradas desde el primer commit —probablemente de una plantilla
+# copiada— y el efecto era que un clon limpio no podía construir la base: el
+# esquema solo existía en la máquina de quien lo hubiera generado. Peor aún,
+# cada uno se autogeneraba las suyas y los historiales divergían en silencio.
+#
+# Una migración es código: describe un cambio de esquema que todo el equipo y
+# todos los entornos tienen que aplicar en el mismo orden.
 
 # Stripe keys
 stripe_test_keys.txt

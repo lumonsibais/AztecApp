@@ -34,6 +34,16 @@ class TourStop(db.Model):
     # Texto de enlace entre esta parada y la siguiente.
     transition_text = db.Column(db.Text)
 
+    # Minutos andando HASTA LA SIGUIENTE parada. El diseño los pinta en el
+    # conector entre dos tarjetas ("🚶 Walk 3 min"), así que el dato pertenece
+    # al tramo, no a la parada; se guarda en la de origen porque es donde
+    # empieza el tramo. La última parada lo deja en null.
+    #
+    # Ojo al reordenar paradas: el valor se queda apuntando al tramo viejo. No
+    # hay forma de evitarlo guardándolo en la otra punta —el problema es el
+    # mismo— así que al cambiar el orden hay que revisarlos.
+    walk_minutes_to_next = db.Column(db.Integer)
+
     created_at = db.Column(db.DateTime, default=utc_ahora)
 
     place = db.relationship('Place', backref='stops')
@@ -49,6 +59,10 @@ class TourStop(db.Model):
             "position": self.position,
             "placeId": self.place_id,
             "transitionText": self.transition_text if unlocked else None,
+            # Los minutos a pie SÍ viajan con el tour bloqueado: son logística,
+            # como la taquilla de un museo. Lo que se paga es el guion y el
+            # audio, no saber que hay tres minutos de camino.
+            "walkMinutesToNext": self.walk_minutes_to_next,
             "audio": {
                 "url": self.audio_url if unlocked else None,
                 "durationSeconds": self.audio_duration_seconds,
@@ -83,6 +97,11 @@ class Tour(db.Model):
     duration_text = db.Column(db.String(120))
 
     difficulty_level = db.Column(db.String(50))  # easy, medium, hard
+
+    # La zona por la que transcurre: "Centro Histórico", "Tlatelolco". El diseño
+    # la pinta en la cabecera junto a la duración y el número de paradas, y es
+    # de lo primero que mira alguien que decide si le queda cerca.
+    neighborhood = db.Column(db.String(120))
     image_url = db.Column(db.String(500))
 
     total_distance = db.Column(db.Float)  # km
@@ -134,6 +153,7 @@ class Tour(db.Model):
             'estimatedDuration': self.estimated_duration,
             'durationText': self.duration_text,
             'difficultyLevel': self.difficulty_level,
+            'neighborhood': self.neighborhood,
             'imageUrl': self.image_url,
             'totalDistance': self.total_distance,
             'hasEntryFees': bool(self.has_entry_fees),

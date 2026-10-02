@@ -34,6 +34,7 @@ def crear_place(app, bloqueado, nombre="Templo Mayor"):
     # peticiones del test client lo reutilizan. Abrir uno anidado crea una
     # sesión aparte y el test acaba leyendo datos rancios.
     place = Place(
+        is_published=True,
         id="place-" + ("lock" if bloqueado else "open"),
         name=nombre,
         description="Descripción de pago",
@@ -94,7 +95,8 @@ def test_no_se_puede_subir_de_tier_desde_el_perfil(client, app):
 
 
 @pytest.mark.parametrize("campo", ["is_verified", "is_active", "total_tours_completed",
-                                   "email", "password_hash", "id"])
+                                   "email", "password_hash", "id",
+                                   "is_admin", "has_full_access"])
 def test_ningun_campo_privilegiado_pasa_por_el_perfil(client, campo):
     tokens = registrar(client, email=campo + "@example.com")
     r = client.put("/api/users/profile", json={campo: "x"}, headers=auth(tokens))

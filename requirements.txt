@@ -15,9 +15,18 @@ psycopg2-binary==2.9.9
 # SQLAlchemy. Necesaria para Place.geom y LakeGeometry del sprint 1.3.
 GeoAlchemy2==0.20.0
 requests==2.31.0
-# stripe 5.16.0 no existe en PyPI: `pip install -r requirements.txt` fallaba
-# en limpio. Todavía no se importa en ningún sitio (app/payments/providers.py
-# es la costura y está sin implementar), así que se fija la estable actual.
+# Firma de los tokens con los que se habla con las tiendas: ES256 contra la App
+# Store Server API y RS256 para la cuenta de servicio de Google. PyJWT ya venía
+# de rebote con Flask-JWT-Extended, pero ahora se importa directamente en
+# app/payments, así que se fija. El extra [crypto] arrastra `cryptography`, sin
+# la cual PyJWT solo sabe HS256 y `jwt.encode(..., algorithm="ES256")` revienta
+# con NotImplementedError; ese fallo aparecería en la primera compra real y no
+# antes, porque nada más del backend firma con clave asimétrica.
+PyJWT[crypto]==2.9.0
+# El cobro se hace desde las tiendas, así que stripe ya no tiene papel: Apple y
+# Google no permiten cobrar contenido digital por fuera de su sistema. Se deja
+# fijada y sin importar en ningún sitio por si algún día hay compra desde web,
+# que es el único lugar donde sería legítima.
 stripe==15.6.1
 
 # Generación y verificación del contrato OpenAPI (spec.py y tests/test_contract.py).

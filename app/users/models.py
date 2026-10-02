@@ -49,6 +49,14 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_verified = db.Column(db.Boolean, default=False)
 
+    # Quién puede escribir en el catálogo.
+    #
+    # NO se concede por ningún endpoint, ni siquiera a otro admin: se pone a
+    # mano con `flask admin grant <email>`. La razón es que ya tuvimos una
+    # escalada de privilegios por PUT /profile, y la lección no fue "arreglar
+    # ese campo" sino "no dejar que un permiso se conceda por la API".
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+
     # Audit
     created_at = db.Column(db.DateTime, default=utc_ahora)
     updated_at = db.Column(db.DateTime, default=utc_ahora, onupdate=utc_ahora)
@@ -72,6 +80,7 @@ class User(db.Model):
                 "placesVisited": self.total_places_visited or 0,
             },
             "isVerified": self.is_verified,
+            "isAdmin": bool(self.is_admin),
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 

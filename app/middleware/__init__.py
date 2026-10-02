@@ -159,6 +159,25 @@ def requires_full_access(fn):
     return decorated
 
 
+def requires_admin(fn):
+    """Exige una cuenta de administrador.
+
+    Responde 404 y no 403 a quien no lo es. Es deliberado: un 403 confirma que
+    la ruta existe, y la de administración no tiene por qué ser descubrible
+    desde la app. Quien la necesita ya sabe que está ahí.
+    """
+
+    @wraps(fn)
+    @token_required
+    def decorated(*args, **kwargs):
+        usuario = current_user()
+        if not usuario or not usuario.is_admin:
+            return _error("NOT_FOUND", 404)
+        return fn(*args, **kwargs)
+
+    return decorated
+
+
 def location_permission_required(fn):
     """Exige que el usuario haya concedido permiso de ubicación."""
 

@@ -37,6 +37,40 @@ flutter pub get
 flutter run --dart-define=API_BASE=http://localhost:5001
 ```
 
+## El camino sin Docker: desde el venv
+
+A veces hace falta correr algo contra la base directamente —una migración, el
+seed, los tests— sin pasar por el contenedor de la API. Para eso basta con el
+Postgres de `docker compose`, que publica el **5432** al Mac:
+
+```bash
+docker compose up -d db          # solo la base, sin la API
+source .venv/bin/activate
+flask db upgrade
+pytest
+```
+
+No hace falta exportar nada: el valor por defecto de `app/config.py` apunta a
+ese mismo Postgres (`aztec:aztec@localhost:5432/aztec_explorer`), y los tests
+usan su propia base (`aztec_explorer_test`), así que correrlos no toca tus
+datos.
+
+Si quieres cambiar algo —otra base, otro puerto, las claves de JWT— copia el
+ejemplo y edítalo:
+
+```bash
+cp .env.example .env
+```
+
+Ese `.env` lo lee `app/config.py` al importarse, así que vale igual para
+`flask`, `pytest`, `seed.py`, `smoke.py` y `python run.py`. Antes solo lo leía
+el comando `flask`, y la misma orden funcionaba o no según por dónde entraras.
+
+> Si ves `password authentication failed for user "user"`, estás en una versión
+> anterior a este cambio: ese usuario no existe en ninguna parte del proyecto,
+> era un resto del andamio inicial. Exporta `DATABASE_URL` a mano o actualiza
+> la rama.
+
 ## A qué dirección apunta el front
 
 Esta es la parte que hace perder media hora, así que va aparte:
@@ -110,8 +144,9 @@ solo: **no hace falta reconstruir** para cambiar código Python. Solo si tocas
 
 ## Probar el desbloqueo de 15 USD
 
-En local, `PAYMENTS_ALLOW_UNVERIFIED` está en `true` y `/confirm` concede el
-acceso sin pasarela. Sirve para ver la app con todo desbloqueado:
+El cobro se hace desde las tiendas, y en tu máquina no hay ninguna. Por eso
+`PAYMENTS_ALLOW_UNVERIFIED` está en `true` en local: `/confirm` concede el acceso
+sin preguntarle a Apple ni a Google. Sirve para ver la app con todo desbloqueado:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:5001/api/users/register \
@@ -121,7 +156,7 @@ TOKEN=$(curl -s -X POST http://localhost:5001/api/users/register \
 
 curl -s -X POST http://localhost:5001/api/payments/confirm \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"provider":"stripe","externalId":"pi_prueba"}'
+  -d '{"provider":"apple","externalId":"recibo_de_prueba"}'
 ```
 
 En cualquier entorno que no sea tu máquina, esa variable va en `false`: con ella

@@ -6,6 +6,7 @@ El documento es la frontera entre backend y frontend. Regenerarlo es barato;
 que se quede desactualizado sale caro, así que `tests/test_contract.py` lo
 valida contra las respuestas reales del servidor en cada vuelta de la suite.
 """
+import decimal
 import json
 import pathlib
 import sys
@@ -17,8 +18,26 @@ from app.api_spec import build_spec
 RAIZ = pathlib.Path(__file__).parent
 
 
+def _serializable(nodo):
+    """Convierte los Decimal del documento en números de JSON.
+
+    Salen de `fields.Decimal` en los schemas de administración, que es el tipo
+    correcto para dinero: las tarifas de museo son importes exactos y un float
+    los redondea mal. El tipo se queda donde importa —la validación— y solo se
+    afloja al escribir el documento, que es texto.
+    """
+    if isinstance(nodo, decimal.Decimal):
+        entero = int(nodo)
+        return entero if nodo == entero else float(nodo)
+    if isinstance(nodo, dict):
+        return {k: _serializable(v) for k, v in nodo.items()}
+    if isinstance(nodo, (list, tuple)):
+        return [_serializable(x) for x in nodo]
+    return nodo
+
+
 def main():
-    documento = build_spec().to_dict()
+    documento = _serializable(build_spec().to_dict())
 
     rutas = len(documento["paths"])
     operaciones = sum(
