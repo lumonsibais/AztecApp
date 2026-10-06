@@ -147,10 +147,14 @@ class SavedPlaceRepository:
         """Los sitios guardados, del más reciente al más antiguo."""
         from app.places.models import Place
 
+        # También filtra por publicado: si un sitio se retira del catálogo,
+        # desaparece de los guardados en vez de quedar como una tarjeta que
+        # lleva a un 404.
         return (
             db.session.query(Place)
             .join(SavedPlace, SavedPlace.place_id == Place.id)
             .filter(SavedPlace.user_id == user_id)
+            .filter(Place.is_published.is_(True))
             .order_by(SavedPlace.created_at.desc())
             .all()
         )

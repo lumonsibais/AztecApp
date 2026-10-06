@@ -54,6 +54,9 @@ TAGS = [
     {"name": "tours", "description": "Recorridos autoguiados y su avance."},
     {"name": "historical", "description": "Guía histórica y overlay del lago."},
     {"name": "payments", "description": "El desbloqueo único."},
+    {"name": "admin", "description":
+        "Escritura del catálogo. Cerrada con rol de administrador, que se "
+        "concede desde la consola del servidor y nunca por la API."},
 ]
 
 
@@ -93,9 +96,11 @@ def _ok(descripcion, envoltorio):
     }
 
 
-def _body(schema):
+def _body(schema, required=True):
+    # `required=False` solo lo usa /payments/restore, que admite llamarse sin
+    # cuerpo cuando el cliente no tiene ningún recibo que presentar.
     return {
-        "required": True,
+        "required": required,
         "content": {"application/json": {
             "schema": {"$ref": f"#/components/schemas/{schema}"}
         }},
@@ -282,6 +287,14 @@ def build_spec() -> APISpec:
         spec.components.schema(nombre, definicion)
 
     _rutas(spec)
+
+    # Las de administración van en el mismo documento a propósito: el test de
+    # cobertura exige que ninguna ruta quede sin documentar, y sacar un
+    # prefijo entero a otro archivo significaría exceptuarlo de esa
+    # comprobación.
+    from app.api_spec.admin_paths import registrar as registrar_admin
+    registrar_admin(spec)
+
     return spec
 
 
@@ -606,15 +619,73 @@ def _rutas(spec):
 
     spec.path(path="/api/payments/confirm", operations={"post": {
         "tags": ["payments"], "summary": "Confirmar el cobro y conceder el acceso",
-        "description": "Idempotente por (provider, externalId): un webhook "
-                       "repetido encuentra la compra en vez de duplicarla.\n\n"
-                       "**501 mientras la pasarela no esté implementada.** "
-                       "Aceptar un recibo sin comprobarlo contra el proveedor "
-                       "sería regalar el contenido a cualquiera que mande una "
-                       "petición inventada.",
+        "description":
+            "El cobro lo hace la tienda. `externalId` es el **transactionId** de "
+            "StoreKit 2 (`provider: apple`) o el **purchaseToken** de Play "
+            "Billing (`provider: google`), y el servidor lo comprueba contra "
+            "Apple o Google antes de conceder nada: lo que manda el cliente no "
+            "desbloquea por sí mismo.\n\n"
+            "No se manda el identificador del producto: solo hay uno y está en "
+            "la configuración del servidor.\n\n"
+            "Idempotente por (provider, externalId): el mismo recibo dos veces "
+            "no duplica la compra.\n\n"
+            "**402** cuando la tienda no confirma el cobro —recibo desconocido, "
+            "compra reembolsada, pago pendiente, o el servidor sin credenciales "
+            "de tienda—. **409** cuando el recibo ya está aplicado a otra cuenta.",
         "security": AUTH,
         "requestBody": _body("PurchaseConfirmRequest"),
         "responses": {"200": _ok("Acceso concedido", "PurchaseResponse"),
                       "400": _err("Cuerpo inválido"),
                       "401": _err("Sin token"),
-                      "501": _err("El proveedor todavía no verifica cobros")}}})
+                      "402": _err("La tienda no confirma el cobro"),
+                      "409": _err("El recibo ya está aplicado a otra cuenta")}}})
+
+    spec.path(path="/api/payments/restore", operations={"post": {
+        "tags": ["payments"], "summary": "Restaurar una compra anterior",
+        "description":
+            "Lo que hay detrás del botón **Restore Purchases**, que Apple exige "
+            "en toda app con producto no consumible: sin él, la revisión "
+            "rechaza la entrega.\n\n"
+            "Con cuerpo, el cliente manda la transacción que le ha devuelto la "
+            "tienda y se verifica igual que una compra nueva. **Sin cuerpo**, se "
+            "devuelve lo que ya conste a nombre de la cuenta, y 404 si nunca "
+            "compró.",
+        "security": AUTH,
+        "requestBody": _body("PurchaseConfirmRequest", required=False),
+        "responses": {"200": _ok("Acceso restaurado", "PurchaseResponse"),
+                      "400": _err("Cuerpo inválido"),
+                      "401": _err("Sin token"),
+                      "402": _err("La tienda no confirma el cobro"),
+                      "404": _err("No consta ninguna compra que restaurar"),
+                      "409": _err("El recibo ya está aplicado a otra cuenta")}}})
+
+    # Los webhooks de las tiendas se documentan aunque no los llame la app:
+    # forman parte de la superficie pública del servidor y el test de cobertura
+    # del contrato exige que toda ruta registrada esté aquí. Quien los llama es
+    # Apple y Pub/Sub, así que no llevan `security` y su cuerpo es el que defina
+    # cada tienda, no uno nuestro.
+    _webhook = lambda tienda, detalle: {"post": {      # noqa: E731
+        "tags": ["payments"], "summary": f"Notificaciones de {tienda}",
+        "description":
+            f"{detalle}\n\n"
+            "**No lleva autenticación y no puede llevarla**: la llama la "
+            "tienda. Lo que la hace segura es que el contenido de la "
+            "notificación no decide nada: de él solo se saca el identificador "
+            "de la compra y la verdad se pide después a la tienda por una "
+            "conexión autenticada nuestra. Una notificación falsificada no "
+            "concede ni revoca nada.\n\n"
+            "Responde 200 también cuando ignora el aviso, para que la tienda no "
+            "lo reintente; 500 solo si conviene reintentarlo.",
+        "responses": {"200": _ok("Aviso procesado", "MessageResponse"),
+                      "500": _err("Error interno; la tienda reintentará")}}}
+
+    spec.path(path="/api/payments/webhooks/apple", operations=_webhook(
+        "la App Store",
+        "App Store Server Notifications V2. Lo que de verdad importa aquí son "
+        "los reembolsos: cuando Apple devuelve el dinero, nadie abre la app "
+        "para avisarnos y sin esto la cuenta se quedaría con el contenido."))
+
+    spec.path(path="/api/payments/webhooks/google", operations=_webhook(
+        "Google Play",
+        "Real-time developer notifications, entregadas por Pub/Sub. Igual que "
+        "en Apple, lo que se atiende son las compras anuladas."))

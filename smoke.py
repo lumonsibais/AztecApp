@@ -42,12 +42,15 @@ def post(url, tok=None, **kw):
 with app.app_context():
     from app.extensions import db
     from app.payments.models import Purchase
+    from app.tours.models import TourProgress
     from app.users.models import ContentRead, SavedPlace, User
 
-    for modelo in (Purchase, SavedPlace, ContentRead, User):
+    # El orden importa: User va EL ÚLTIMO. TourProgress se borraba después y por
+    # eso la segunda pasada de este script moría con un ForeignKeyViolation
+    # —"still referenced from table tour_progress"—, que en la primera no se ve
+    # porque todavía no hay progreso de nadie.
+    for modelo in (Purchase, SavedPlace, ContentRead, TourProgress, User):
         db.session.query(modelo).delete()
-    from app.tours.models import TourProgress
-    db.session.query(TourProgress).delete()
     db.session.commit()
 
     # ------------------------------------------------------------------
@@ -138,11 +141,11 @@ with app.app_context():
           post("/api/payments/checkout", tk).get_json()["data"]["id"] == co["id"],
           "(misma fila, no duplica)")
     r = post("/api/payments/confirm", tk,
-             json={"provider": "stripe", "externalId": "pi_smoke"})
+             json={"provider": "apple", "externalId": "tx_smoke"})
     print(f"  confirm  -> {r.status_code} {r.get_json()['message']}")
     print("  confirm otra vez ->",
           post("/api/payments/confirm", tk,
-               json={"provider": "stripe", "externalId": "pi_smoke"}
+               json={"provider": "apple", "externalId": "tx_smoke"}
                ).get_json()["message"])
     hist = get("/api/payments/purchases", tk).get_json()["data"]["purchases"]
     print(f"  historial: {len(hist)} apunte(s) -> "

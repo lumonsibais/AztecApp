@@ -1,13 +1,19 @@
 """Payments models.
 
-El producto vende un desbloqueo único de 15 USD. No hay suscripción, así que
-aquí no hay periodos ni renovaciones: solo el registro de que alguien pagó.
+El producto vende un desbloqueo único. No hay suscripción, así que aquí no hay
+periodos ni renovaciones: solo el registro de que alguien pagó.
 
 Separación deliberada:
   - `purchases` guarda el HECHO del cobro, con su proveedor y su referencia.
   - `users.has_full_access` guarda el PERMISO.
-El resto del backend consulta el permiso. Así, cuando se decida si se cobra por
-las tiendas o por pasarela propia, solo cambia cómo se llena esta tabla.
+El resto del backend consulta el permiso. Por eso pasar a cobrar desde las
+tiendas solo cambió cómo se llena esta tabla, y ni una línea del resto.
+
+El importe que se guarda aquí es el de referencia (FULL_ACCESS_PRICE_USD), no
+lo que pagó el comprador: quien cobra es la tienda, en la moneda de su país y
+al escalón de precio que se haya elegido en App Store Connect y en Play Console.
+Lo que de verdad ingresó está en los informes de cada tienda, descontada su
+comisión, y no hay forma de saberlo desde aquí.
 """
 from datetime import datetime
 
@@ -32,11 +38,31 @@ class Purchase(db.Model):
 
     product = db.Column(db.String(50), nullable=False, default=FULL_ACCESS_PRODUCT)
 
-    # De dónde vino el dinero: stripe, apple, google o manual.
+    # De dónde vino el dinero: apple, google o manual.
     provider = db.Column(db.String(20), nullable=False)
-    # Referencia del proveedor: payment intent, transactionId de Apple,
-    # purchaseToken de Google. Es lo que hace la operación idempotente.
-    external_id = db.Column(db.String(255))
+    # Referencia del proveedor: transactionId de Apple, purchaseToken de Google.
+    # Es lo que hace la operación idempotente.
+    #
+    # Text y no String(255): un purchaseToken de Google pasa holgadamente de los
+    # 255 caracteres —suelen rondar los 350— y con el tipo anterior PostgreSQL
+    # habría rechazado la fila con "value too long for type character varying".
+    # Habría reventado la primera compra real de Android y ni un minuto antes.
+    external_id = db.Column(db.Text)
+
+    # Referencia de cabecera de la tienda: originalTransactionId en Apple,
+    # orderId en Google. Es la que traen las notificaciones de reembolso, que no
+    # siempre es la de la transacción concreta.
+    original_transaction_id = db.Column(db.String(255), index=True)
+
+    # Sandbox o Production. Un recibo de sandbox no desbloquea una instalación
+    # de producción, y cuando alguien reporte un acceso raro esto es lo primero
+    # que se mira.
+    store_environment = db.Column(db.String(20))
+
+    # Google reembolsa automáticamente toda compra que no se acuse en 3 días.
+    # Esta marca es lo que permite encontrar las que se quedaron sin acusar
+    # porque la llamada falló, antes de que se cumpla el plazo.
+    acknowledged_at = db.Column(db.DateTime)
 
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     currency = db.Column(db.String(3), nullable=False, default=CURRENCY_USD)

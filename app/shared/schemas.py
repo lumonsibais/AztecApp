@@ -36,8 +36,10 @@ class UserLoginSchema(Schema):
 class UserProfileUpdateSchema(Schema):
     """Lo ÚNICO que un usuario puede cambiar de su propio perfil.
 
-    Fuera quedan a propósito: subscription_tier, subscription_end_date,
-    is_verified, is_active, total_tours_completed, email y password_hash.
+    Fuera quedan a propósito: has_full_access, is_admin, is_verified,
+    is_active, total_tours_completed, email y password_hash. Cualquiera de
+    ellos en el cuerpo devuelve 400, no se ignora en silencio: si alguien
+    intenta ascenderse, preferimos que se note.
     """
 
     class Meta:
@@ -99,15 +101,23 @@ class PurchaseConfirmSchema(Schema):
     """Recibo que manda el cliente tras pagar.
 
     Lo que llega aquí NO se cree: `providers.verificar()` lo comprueba contra
-    el proveedor antes de conceder nada.
+    la tienda antes de conceder nada.
+
+    `externalId` es el transactionId de StoreKit 2 (apple) o el purchaseToken de
+    Play Billing (google). No se pide el identificador del producto: solo hay
+    uno y está en la configuración del servidor, así que el cliente no puede
+    pedir que se le verifique "otro".
     """
 
     class Meta:
         unknown = "raise"
 
     provider = fields.Str(required=True, validate=validate.OneOf(list(PROVIDERS)))
+    # 4096 y no 255: un purchaseToken de Google ronda los 350 caracteres, así
+    # que el límite anterior habría rechazado con un 400 todas las compras de
+    # Android antes siquiera de intentar verificarlas.
     external_id = fields.Str(
-        data_key="externalId", required=True, validate=validate.Length(min=1, max=255)
+        data_key="externalId", required=True, validate=validate.Length(min=1, max=4096)
     )
 
 

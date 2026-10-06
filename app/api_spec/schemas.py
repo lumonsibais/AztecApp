@@ -32,6 +32,13 @@ class LocationSchema(Schema):
     distanceKm = fields.Float(allow_none=True)
 
 
+class PlaceImageSchema(Schema):
+    url = fields.Str(required=True)
+    caption = fields.Str(allow_none=True, metadata={
+        "description": "Pie de foto. Opcional: la mayoría no lo necesita.",
+    })
+
+
 class BadgesSchema(Schema):
     freeEntry = fields.Bool(required=True)
     outdoor = fields.Bool(required=True)
@@ -100,9 +107,26 @@ class PlaceSchema(Schema):
     visitDurationText = fields.Str(allow_none=True, metadata={
         "description": "Lo que se muestra: '2-4 hours'. Un entero no dice eso.",
     })
-    imageUrl = fields.Str(allow_none=True)
+    imageUrl = fields.Str(allow_none=True, metadata={
+        "description": "La PORTADA. Se conserva por compatibilidad: estaba en "
+                       "el contrato antes de que existiera la galería.",
+    })
+    images = fields.List(fields.Nested(PlaceImageSchema), metadata={
+        "description": "La galería del carrusel, en orden, con la portada la "
+                       "primera. Cuando no hay galería pero sí portada, trae "
+                       "esa sola: usa SIEMPRE este campo y nunca llegará vacío "
+                       "habiendo foto.",
+    })
     badges = fields.Nested(BadgesSchema, required=True)
     contentAccess = fields.Nested(ContentAccessSchema, required=True)
+    isPublished = fields.Bool(required=True, metadata={
+        "description": "Si el sitio está en el catálogo público. Distinto de "
+                       "`contentAccess.isLocked`: un sitio bloqueado SÍ sale "
+                       "en Explore —con su candado— mientras que uno sin "
+                       "publicar no existe para la app. Los endpoints "
+                       "públicos solo devuelven publicados, así que ahí "
+                       "siempre llega true.",
+    })
     nearbyServices = fields.Nested(NearbyServicesSchema, required=True)
     isSaved = fields.Bool(allow_none=True, metadata={
         "description": "El corazón. null sin sesión: no es false, es que no aplica.",
@@ -149,6 +173,12 @@ class TourStopSchema(Schema):
     })
     placeId = fields.Str(required=True)
     transitionText = fields.Str(allow_none=True)
+    walkMinutesToNext = fields.Int(allow_none=True, metadata={
+        "description": "Minutos andando HASTA LA PARADA SIGUIENTE. La última "
+                       "lo trae null. Es logística, así que viaja también con "
+                       "el tour bloqueado: lo que se paga es el guion y el "
+                       "audio, no saber cuánto se camina.",
+    })
     audio = fields.Nested(TourAudioSchema, required=True)
     place = fields.Nested(PlaceSchema)
 
@@ -202,6 +232,9 @@ class TourSchema(Schema):
     estimatedDuration = fields.Int(allow_none=True)
     durationText = fields.Str(allow_none=True)
     difficultyLevel = fields.Str(allow_none=True)
+    neighborhood = fields.Str(allow_none=True, metadata={
+        "description": "La zona por la que transcurre: 'Centro Histórico'.",
+    })
     imageUrl = fields.Str(allow_none=True)
     totalDistance = fields.Float(allow_none=True)
     hasEntryFees = fields.Bool()
@@ -347,6 +380,10 @@ class UserSchema(Schema):
     })
     hasFullAccess = fields.Bool(required=True)
     fullAccessSince = fields.Str(allow_none=True)
+    isAdmin = fields.Bool(metadata={
+        "description": "Puede escribir en el catálogo. Se concede desde la "
+                       "consola del servidor, nunca por la API.",
+    })
     locationPermissionStatus = fields.Str(allow_none=True)
     stats = fields.Nested(UserStatsSchema, required=True)
     isVerified = fields.Bool(allow_none=True)

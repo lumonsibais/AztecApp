@@ -102,8 +102,13 @@ GET    /api/users/profile        - Perfil del usuario
 
 ### Payments
 ```
-GET    /api/payments/history     - Historial de pagos
-POST   /api/payments/create      - Crear pago
+GET    /api/payments/access            - ¿Tiene esta cuenta el desbloqueo?
+GET    /api/payments/purchases         - Historial de compras
+POST   /api/payments/checkout          - Abrir una compra
+POST   /api/payments/confirm           - Verificar el recibo y conceder el acceso
+POST   /api/payments/restore           - Restore Purchases
+POST   /api/payments/webhooks/apple    - Avisos de la App Store (los llama Apple)
+POST   /api/payments/webhooks/google   - Avisos de Google Play (los llama Pub/Sub)
 ```
 
 ### Historical
@@ -112,6 +117,83 @@ GET    /api/historical/content   - Contenido histórico
 GET    /api/historical/timelines - Timelines
 GET    /api/historical/lake-view - Datos del lago
 ```
+
+## 💳 Cobro desde las tiendas
+
+El desbloqueo se compra **dentro de la app**, con In-App Purchase de Apple y
+Play Billing de Google. El servidor no cobra: cobra la tienda, y aquí solo se
+comprueba contra ella que el recibo que presenta la app es cierto, es nuestro y
+sigue vivo. Lo que manda el cliente no desbloquea nada por sí mismo.
+
+### Lo que hay que dar de alta (una vez, y no lo puede hacer el código)
+
+**App Store Connect**
+
+1. Un producto **no consumible** con su identificador → `APPLE_PRODUCT_ID`.
+2. Una clave de API de In-App Purchase (Users and Access → Integrations). Se
+   descarga **una sola vez**: el `.p8` → `APPLE_PRIVATE_KEY`, y con él el
+   *Key ID* → `APPLE_KEY_ID` y el *Issuer ID* → `APPLE_ISSUER_ID`.
+3. El bundle id de la app → `APPLE_BUNDLE_ID`.
+4. La URL de notificaciones V2 apuntando a `/api/payments/webhooks/apple`.
+
+**Play Console + Google Cloud**
+
+1. Un producto **gestionado** (one-time) con su id → `GOOGLE_PRODUCT_ID`.
+2. Una cuenta de servicio con acceso a la app y permiso para ver datos
+   financieros; su JSON → `GOOGLE_SERVICE_ACCOUNT_JSON`.
+3. El nombre del paquete → `GOOGLE_PACKAGE_NAME`.
+4. Un tema de Pub/Sub para las *real-time developer notifications*, con entrega
+   push a `/api/payments/webhooks/google`.
+
+Sin estas credenciales, `/payments/confirm` responde **402** diciendo que el
+cobro no está configurado. Es a propósito: un servidor a medio configurar niega
+el acceso, no lo regala.
+
+### Lo que tiene que hacer la app
+
+- Mandar el **id de usuario** al iniciar la compra: `appAccountToken` en
+  StoreKit 2, `obfuscatedExternalAccountId` en Play Billing. La tienda lo
+  devuelve intacto y el servidor lo comprueba; es la única defensa contra el
+  reenvío de recibos ajenos que no se puede falsificar desde el cliente.
+- Mandar a `/payments/confirm` el **transactionId** (Apple) o el
+  **purchaseToken** (Google) en `externalId`.
+- Enseñar el precio que da la tienda, no el de `/payments/access`: ese es solo
+  una referencia. El que paga el comprador lo fija el escalón de precio elegido
+  en cada consola, en la moneda de su país.
+- Tener un botón **Restore Purchases** contra `/payments/restore`. Apple rechaza
+  en revisión toda app con producto no consumible que no lo ofrezca.
+
+### Lo que tiene que correr en el servidor
+
+```bash
+flask payments acusar-pendientes     # una vez al día, en cron
+```
+
+Google **reembolsa automáticamente** toda compra que no se acuse en 3 días. El
+acuse normal se hace justo después de conceder el acceso, pero si esa llamada
+falla nadie se entera: al usuario ya se le respondió que todo fue bien. Este
+comando recoge las que se quedaron atrás. Sin él, el fallo se ve en el informe
+de ingresos y no antes.
+
+### Altas a mano
+
+```bash
+flask payments grant alguien@ejemplo.com --motivo "prueba de prensa"
+```
+
+Para cortesías, pruebas y soporte. Está en la consola y no en la API por lo
+mismo que el rol de administrador: un acceso que se concede por la API es un
+acceso que alguien va a intentar concederse.
+
+### Los webhooks no llevan autenticación, y está bien
+
+Los llaman Apple y Pub/Sub, así que no pueden llevarla. Lo que los hace seguros
+es que **el contenido de la notificación no decide nada**: de él solo se saca el
+identificador de la compra, y la verdad se pide después a la tienda por una
+conexión autenticada nuestra. Una notificación falsificada no concede ni revoca
+nada; lo peor que consigue quien la invente es que le preguntemos a Apple por una
+compra. `STORE_WEBHOOK_SECRET` añade un secreto en la URL para evitar hasta eso,
+pero es un extra, no lo que sostiene el diseño.
 
 ## 🏗️ Arquitectura
 

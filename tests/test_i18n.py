@@ -13,6 +13,7 @@ from app.shared.translations_repository import TranslationRepository
 
 def crear_place(pid="p1", nombre="Great Temple", desc="The main temple"):
     place = Place(
+        is_published=True,
         id=pid,
         name=nombre,
         description=desc,

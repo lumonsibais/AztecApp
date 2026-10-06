@@ -20,6 +20,7 @@ TEOTIHUACAN = (19.6925, -98.8438)           # ~45 km
 
 def crear(pid, lat, lon, nombre):
     place = Place(
+        is_published=True,
         id=pid, name=nombre, description="d",
         latitude=lat, longitude=lon,
         place_type="ruin", historical_significance="h",

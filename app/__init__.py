@@ -13,6 +13,7 @@ from app.tours import tours_bp
 from app.users import users_bp
 from app.payments import payments_bp
 from app.historical import historical_bp
+from app.admin import admin_bp
 
 
 def create_app(config_env: str = None):
@@ -41,7 +42,13 @@ def create_app(config_env: str = None):
     # Idioma de la petición: deja g.locale listo antes de cualquier handler.
     register_locale_middleware(app)
 
+    # Comandos de consola. Ahí vive lo que no debe poder hacerse por la API:
+    # conceder el rol de administrador.
+    from app.cli import register_cli
+    register_cli(app)
+
     # Register blueprints
+    app.register_blueprint(admin_bp)
     app.register_blueprint(places_bp)
     app.register_blueprint(tours_bp)
     app.register_blueprint(users_bp)

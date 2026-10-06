@@ -87,6 +87,7 @@ def mundo(client, app):
     app.config["PAYMENTS_ALLOW_UNVERIFIED"] = True
 
     abierto = Place(
+        is_published=True,
         id="templo-mayor", name="Templo Mayor Remains",
         tagline="The sacred heart of the empire",
         description="What is left of the great temple.",
@@ -102,6 +103,7 @@ def mundo(client, app):
         has_bathrooms=True, is_locked=False,
     )
     cerrado = Place(
+        is_published=True,
         id="museo", name="National Museum of Anthropology",
         tagline="The 24-ton Sun Stone", description="Paid body.",
         latitude=19.4260, longitude=-99.1863, neighborhood="Chapultepec",
@@ -179,9 +181,18 @@ def mundo(client, app):
     client.post("/api/historical/content/founding/read", headers=cabecera)
     client.post("/api/tours/ruta/start", headers=cabecera)
 
+    # Una cuenta de administrador aparte. El rol se concede como en producción
+    # —a mano, no por la API— pero sí hace falta para recorrer /api/admin.
+    admin = client.post("/api/users/register",
+                        json={"email": "jefe@az.com",
+                              "password": "testpassword123"}).get_json()["data"]
+    from app.users.repositories import UserRepository
+    UserRepository.update(admin["user"]["id"], {"is_admin": True})
+
     return {
         "auth": cabecera,
         "refresh": {"Authorization": "Bearer " + tokens["refreshToken"]},
+        "admin": {"Authorization": "Bearer " + admin["accessToken"]},
         "userId": tokens["user"]["id"],
     }
 
@@ -308,6 +319,24 @@ LLAMADAS = [
     ("/api/payments/access", "get", "/api/payments/access", 401, None),
     ("/api/payments/purchases", "get", "/api/payments/purchases", 200, "auth"),
     ("/api/payments/checkout", "post", "/api/payments/checkout", 409, "auth"),
+
+    # administración: las de lectura, las de escritura, y el cierre
+    ("/api/admin/places", "get", "/api/admin/places", 200, "admin"),
+    ("/api/admin/places", "get", "/api/admin/places", 401, None),
+    ("/api/admin/places", "post", "/api/admin/places", 201, "admin"),
+    ("/api/admin/places/{place_id}", "put", "/api/admin/places/museo", 200, "admin"),
+    ("/api/admin/places/{place_id}", "put",
+     "/api/admin/places/no-existe", 404, "admin"),
+    ("/api/admin/tours", "get", "/api/admin/tours", 200, "admin"),
+    ("/api/admin/tours", "post", "/api/admin/tours", 201, "admin"),
+    ("/api/admin/tours/{tour_id}", "put", "/api/admin/tours/ruta", 200, "admin"),
+    ("/api/admin/content", "get", "/api/admin/content", 200, "admin"),
+    ("/api/admin/content", "post", "/api/admin/content", 201, "admin"),
+    ("/api/admin/content/{content_id}", "put",
+     "/api/admin/content/founding", 200, "admin"),
+    ("/api/admin/lake-geometries", "get", "/api/admin/lake-geometries", 200, "admin"),
+    ("/api/admin/lake-geometries", "post",
+     "/api/admin/lake-geometries", 201, "admin"),
 ]
 
 CUERPOS = {
@@ -319,6 +348,30 @@ CUERPOS = {
     ("/api/users/location-permission", "post"): {"response": "granted"},
     ("/api/tours/{tour_id}/progress", "put"): {"currentStopIndex": 1},
     ("/api/tours/{tour_id}/complete", "post"): {"rating": 5},
+
+    ("/api/admin/places", "post"): {
+        "id": "sitio-del-contrato", "name": "Contract place",
+        "description": "Body", "latitude": 19.4, "longitude": -99.1,
+        "place_type": "ruin", "historical_significance": "S",
+        "estimated_visit_duration": 45,
+    },
+    ("/api/admin/places/{place_id}", "put"): {"tagline": "Editado"},
+    ("/api/admin/tours", "post"): {
+        "id": "ruta-del-contrato", "title": "Contract tour",
+        "description": "Teaser", "estimated_duration": 90,
+    },
+    ("/api/admin/tours/{tour_id}", "put"): {"difficulty_level": "easy"},
+    ("/api/admin/content", "post"): {
+        "id": "articulo-del-contrato", "title": "Contract article",
+        "description": "D", "content_type": "text", "text_content": "Cuerpo",
+    },
+    ("/api/admin/content/{content_id}", "put"): {"topic": "Editado"},
+    ("/api/admin/lake-geometries", "post"): {
+        "name": "Del contrato", "surface_type": "water", "year_estimate": 1500,
+        "geometry": {"type": "Polygon", "coordinates": [[
+            [-99.2, 19.3], [-99.2, 19.5], [-99.0, 19.5],
+            [-99.0, 19.3], [-99.2, 19.3]]]},
+    },
 }
 
 
